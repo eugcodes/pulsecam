@@ -50,9 +50,7 @@ export function BPMDisplay({ bpm, state, confidence }: BPMDisplayProps) {
             Confidence {Math.round(confidence * 100)}%
           </p>
         )}
-        {state === 'idle' && (
-          <p className="text-xs text-text-secondary/30">Paused</p>
-        )}
+        {state === 'idle' && null}
       </div>
     </div>
   );

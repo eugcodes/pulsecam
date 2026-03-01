@@ -71,6 +71,7 @@ export default function App() {
           videoRef={camera.videoRef}
           faceDetected={pulse.faceDetected}
           isActive={camera.isActive}
+          isRunning={pulse.isRunning}
         />
 
         {/* Controls */}
