@@ -7,10 +7,10 @@
  */
 
 import {
-  detrendMovingAverage,
+  detrend,
   normalize,
   butterworthBandpass,
-  filterSignalZeroPhase,
+  filterSignal,
   dominantFrequency,
 } from './filters';
 
@@ -46,10 +46,43 @@ export function posAlgorithm(
   if (n < 3) return new Float64Array(0);
 
   const windowLen = Math.round(POS_WINDOW_SEC * sampleRate);
+  const H = new Float64Array(n);
 
-  // Compute in overlapping windows with alpha weighting
+  for (let t = 0; t < n; t++) {
+    const start = Math.max(0, t - windowLen + 1);
+    const end = t + 1;
+    const len = end - start;
+
+    // Compute temporal mean of RGB in window
+    let meanR = 0, meanG = 0, meanB = 0;
+    for (let i = start; i < end; i++) {
+      meanR += rgbBuffer[i].r;
+      meanG += rgbBuffer[i].g;
+      meanB += rgbBuffer[i].b;
+    }
+    meanR /= len;
+    meanG /= len;
+    meanB /= len;
+
+    // Avoid division by zero
+    if (meanR < 1e-6 || meanG < 1e-6 || meanB < 1e-6) continue;
+
+    // Normalize Cn = [R/meanR, G/meanG, B/meanB] for current sample
+    const cn_r = rgbBuffer[t].r / meanR;
+    const cn_g = rgbBuffer[t].g / meanG;
+    const cn_b = rgbBuffer[t].b / meanB;
+
+    // POS projection: S1 = Cn_g - Cn_b, S2 = Cn_g + Cn_b - 2*Cn_r
+    const s1 = cn_g - cn_b;
+    const s2 = cn_g + cn_b - 2 * cn_r;
+
+    // Combine: H(t) = S1 + alpha * S2, where alpha = std(S1)/std(S2)
+    // For per-sample, approximate with the window stats
+    H[t] = s1; // Initial estimate, refined below
+  }
+
+  // Compute in overlapping windows for alpha
   const result = new Float64Array(n);
-  const overlapCount = new Float64Array(n);
   const wLen = Math.max(windowLen, 10);
 
   for (let start = 0; start < n; start += Math.floor(wLen / 2)) {
@@ -105,16 +138,10 @@ export function posAlgorithm(
 
     const alpha = stdS2 > 1e-10 ? stdS1 / stdS2 : 1;
 
-    // Accumulate with overlap-add
+    // Combine with overlap-add
     for (let i = 0; i < len; i++) {
       result[start + i] += S1[i] + alpha * S2[i];
-      overlapCount[start + i] += 1;
     }
-  }
-
-  // Normalize by overlap count to prevent amplitude modulation
-  for (let i = 0; i < n; i++) {
-    if (overlapCount[i] > 0) result[i] /= overlapCount[i];
   }
 
   return result;
@@ -137,12 +164,12 @@ export function processRPPG(
   const rawPulse = posAlgorithm(rgbBuffer, sampleRate);
   if (rawPulse.length === 0) return null;
 
-  // 2. Detrend (remove slow drift via moving-average subtraction)
-  const detrended = detrendMovingAverage(rawPulse, Math.round(sampleRate * 1.5));
+  // 2. Detrend (remove slow drift)
+  const detrended = detrend(rawPulse);
 
-  // 3. Bandpass filter (0.7–4.0 Hz = 42–240 BPM), zero-phase
+  // 3. Bandpass filter (0.7–4.0 Hz = 42–240 BPM)
   const coeffs = butterworthBandpass(MIN_HR_HZ, MAX_HR_HZ, sampleRate);
-  const filtered = filterSignalZeroPhase(detrended, coeffs);
+  const filtered = filterSignal(detrended, coeffs);
 
   // 4. Normalize for display
   const waveform = normalize(filtered);

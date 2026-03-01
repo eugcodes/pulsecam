@@ -69,16 +69,8 @@ export function dominantFrequency(
   minHz: number,
   maxHz: number,
 ): { frequency: number; magnitude: number; spectrum: Float64Array } {
-  // Apply Hann window to reduce spectral leakage
-  const n = signal.length;
-  const windowed = new Float64Array(n);
-  for (let i = 0; i < n; i++) {
-    windowed[i] =
-      signal[i] * (0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (n - 1)));
-  }
-
-  const N = nextPow2(n);
-  const mag = fft(windowed);
+  const N = nextPow2(signal.length);
+  const mag = fft(signal);
 
   const minBin = Math.max(1, Math.floor((minHz * N) / sampleRate));
   const maxBin = Math.min(mag.length - 1, Math.ceil((maxHz * N) / sampleRate));
@@ -185,23 +177,6 @@ export function filterSignal(
     out[i] = biquadFilter(signal[i], coeffs, state);
   }
   return out;
-}
-
-/** Zero-phase (forward-backward) biquad filter. Eliminates phase distortion. */
-export function filterSignalZeroPhase(
-  signal: Float64Array,
-  coeffs: BiquadCoeffs,
-): Float64Array {
-  // Forward pass
-  const forward = filterSignal(signal, coeffs);
-  // Reverse, filter again, reverse back
-  const n = forward.length;
-  const reversed = new Float64Array(n);
-  for (let i = 0; i < n; i++) reversed[i] = forward[n - 1 - i];
-  const backward = filterSignal(reversed, coeffs);
-  const result = new Float64Array(n);
-  for (let i = 0; i < n; i++) result[i] = backward[n - 1 - i];
-  return result;
 }
 
 // ─── Detrending ──────────────────────────────────────────────────────────────
