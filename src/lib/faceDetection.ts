@@ -108,9 +108,9 @@ export function detectFace(
     maxY = Math.max(maxY, p.y);
   }
 
-  // Add small padding
-  const padX = (maxX - minX) * 0.05;
-  const padY = (maxY - minY) * 0.05;
+  // Pad ROI to average more skin pixels (reduces noise, helps in low light)
+  const padX = (maxX - minX) * 0.15;
+  const padY = (maxY - minY) * 0.15;
   minX = Math.max(0, minX - padX);
   minY = Math.max(0, minY - padY);
   maxX = Math.min(videoWidth, maxX + padX);

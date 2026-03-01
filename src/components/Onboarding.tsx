@@ -58,8 +58,8 @@ export function Onboarding({ forceShow, onDismiss }: OnboardingProps) {
           <Step n={2} title="Signal Processing">
             rPPG algorithms extract your pulse in real time
           </Step>
-          <Step n={3} title="Display pulse and waveform">
-            Displays your heart rate and live pulse waveform
+          <Step n={3} title="Display heart rate">
+            Displays your pulse and live pulse waveform
           </Step>
         </div>
 
