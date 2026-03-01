@@ -32,8 +32,8 @@ export function CameraFeed({
 
       {/* Analysis paused (camera on, measurement off) */}
       {isActive && !isRunning && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/40 backdrop-blur-[2px]">
-          <p className="text-sm text-text-secondary/70">Analysis paused</p>
+        <div className="absolute inset-0 flex items-center justify-center bg-black/50 backdrop-blur-[2px]">
+          <p className="text-lg font-medium text-text-primary/80">Analysis paused</p>
         </div>
       )}
 

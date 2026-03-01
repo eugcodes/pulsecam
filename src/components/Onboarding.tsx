@@ -43,7 +43,7 @@ export function Onboarding({ forceShow, onDismiss }: OnboardingProps) {
             PulseCam
           </h2>
           <p className="mt-1 text-sm text-text-secondary">
-            Measures your heart rate using your camera.
+            Measures your heart rate using your camera
           </p>
           <p className="mt-0.5 text-[11px] text-text-secondary/40">
             All processing happens locally. No data leaves your device.
@@ -53,13 +53,13 @@ export function Onboarding({ forceShow, onDismiss }: OnboardingProps) {
         {/* How it works */}
         <div className="mb-5 space-y-2.5">
           <Step n={1} title="Video Analysis">
-            Blood flow causes subtle changes in skin color.
+            Blood flow causes subtle changes in skin color
           </Step>
           <Step n={2} title="Signal Processing">
-            rPPG algorithms extract your pulse in real time.
+            rPPG algorithms extract your pulse in real time
           </Step>
           <Step n={3} title="Display pulse and waveform">
-            Displays your heart rate and live pulse waveform.
+            Displays your heart rate and live pulse waveform
           </Step>
         </div>
 
@@ -107,10 +107,10 @@ export function Onboarding({ forceShow, onDismiss }: OnboardingProps) {
 function Step({ n, title, children }: { n: number; title: string; children: React.ReactNode }) {
   return (
     <div className="flex gap-3">
-      <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-accent/10 text-[11px] font-bold text-accent">
+      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent/10 text-sm font-bold text-accent">
         {n}
       </div>
-      <div className="pt-0.5">
+      <div>
         <p className="text-sm font-medium leading-tight text-text-primary">{title}</p>
         <p className="mt-0.5 text-xs leading-snug text-text-secondary/70">{children}</p>
       </div>
