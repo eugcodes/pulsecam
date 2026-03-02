@@ -20,13 +20,12 @@ const BG_COLOR = '#0d1117';
  * each snapshot, changing values everywhere, but we never overwrite
  * existing display samples.
  *
- * **Drip-feed scrolling**: Instead of a time-based scroll offset that resets
- * each snapshot (two clocks that inevitably disagree), new samples are
- * queued and drained one at a time into the display buffer at the real
- * sample rate. The scroll IS the data advancement — one unified clock.
- * A fractional sub-pixel offset provides inter-sample smoothness.
- * The display is ~250ms behind real-time (half the queue depth), which
- * acts as a jitter buffer preventing stalls.
+ * **Drip-feed scrolling**: New samples are queued and drained one at a time
+ * at the measured data arrival rate. A fractional accumulator provides
+ * sub-pixel smoothness. The accumulator grows freely even when the queue
+ * is temporarily empty — the identity x = i·step - sub·step is invariant
+ * under draining (D samples drained → index becomes i−D, accumulator
+ * becomes sub−D, same x), so catch-up drains produce zero visual jump.
  */
 
 const Y_MIN = -2.8;
@@ -50,6 +49,8 @@ export function WaveformChart({ waveform, isActive }: WaveformChartProps) {
   const bufLenRef = useRef(0);
   // Timestamp of last waveform update (for estimating new-sample count).
   const lastUpdateRef = useRef(0);
+  // Measured data arrival rate (samples/sec), adapted via EMA.
+  const arrivalRateRef = useRef(0);
 
   const isActiveRef = useRef(isActive);
   isActiveRef.current = isActive;
@@ -82,6 +83,14 @@ export function WaveformChart({ waveform, isActive }: WaveformChartProps) {
       const startIdx = Math.max(0, waveform.length - shift);
       for (let i = startIdx; i < waveform.length; i++) {
         pendingRef.current.push(waveform[i]);
+      }
+
+      // Adapt the drain rate to match actual arrival rate (EMA, α=0.3).
+      if (elapsed > 100 && shift > 0) {
+        const instantRate = (shift / elapsed) * 1000;
+        arrivalRateRef.current = arrivalRateRef.current > 0
+          ? 0.7 * arrivalRateRef.current + 0.3 * instantRate
+          : instantRate;
       }
 
       // Safety cap: never let the queue exceed one window of data.
@@ -143,33 +152,39 @@ export function WaveformChart({ waveform, isActive }: WaveformChartProps) {
         return;
       }
 
-      // ── Drip-feed: drain pending samples at the real-time rate ────────
+      // ── Drip-feed: drain pending samples at the measured rate ──────────
       const dt = lastFrameRef.current > 0 ? now - lastFrameRef.current : 0;
       lastFrameRef.current = now;
 
-      const sampleRate = bufLenRef.current / WINDOW_SEC;
+      // Use the adaptive arrival rate, falling back to the static estimate.
+      const drainRate = arrivalRateRef.current || (bufLenRef.current / WINDOW_SEC);
       const pending = pendingRef.current;
 
-      if (pending.length > 0) {
-        subSampleRef.current += (dt / 1000) * sampleRate;
+      // Always accumulate, even when the queue is briefly empty.
+      // The identity x = i·step − sub·step is invariant under draining:
+      //   (i−D)·step − (sub−D)·step = i·step − sub·step
+      // so catch-up drains when data resumes produce zero visual jump.
+      subSampleRef.current += (dt / 1000) * drainRate;
 
-        const toDrain = Math.min(
-          Math.floor(subSampleRef.current),
-          pending.length,
-        );
+      // Soft cap: if data stops entirely, pause after 2 seconds of coasting.
+      subSampleRef.current = Math.min(
+        subSampleRef.current,
+        bufLenRef.current * 0.2,
+      );
 
-        if (toDrain > 0) {
-          subSampleRef.current -= toDrain;
-          // Shift buffer left by toDrain, append new samples at the right.
-          buf.copyWithin(0, toDrain);
-          for (let j = 0; j < toDrain; j++) {
-            buf[buf.length - toDrain + j] = pending[j];
-          }
-          pending.splice(0, toDrain);
+      const toDrain = Math.min(
+        Math.floor(subSampleRef.current),
+        pending.length,
+      );
+
+      if (toDrain > 0) {
+        subSampleRef.current -= toDrain;
+        // Shift buffer left by toDrain, append new samples at the right.
+        buf.copyWithin(0, toDrain);
+        for (let j = 0; j < toDrain; j++) {
+          buf[buf.length - toDrain + j] = pending[j];
         }
-      } else {
-        // Queue empty — hold position until more data arrives.
-        subSampleRef.current = 0;
+        pending.splice(0, toDrain);
       }
 
       // ── Draw waveform ─────────────────────────────────────────────────
