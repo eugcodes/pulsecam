@@ -30,6 +30,14 @@ export default function App() {
     pulse.stop();
   }, [pulse]);
 
+  const handleToggleMeasure = useCallback(() => {
+    if (pulse.isRunning) {
+      pulse.stop();
+    } else {
+      pulse.start();
+    }
+  }, [pulse]);
+
   return (
     <div className="flex min-h-screen flex-col bg-bg-primary">
       <Onboarding />
@@ -72,6 +80,7 @@ export default function App() {
           faceDetected={pulse.faceDetected}
           isActive={camera.isActive}
           isRunning={pulse.isRunning}
+          onToggleMeasure={handleToggleMeasure}
         />
 
         {/* Controls */}
