@@ -17,6 +17,7 @@ export interface PulseDetectionResult {
   start: () => void;
   stop: () => void;
   isRunning: boolean;
+  newSampleCount: number;
   loadingMessage: string;
 }
 
@@ -39,12 +40,12 @@ export function usePulseDetection(
   const [faceROI, setFaceROI] = useState<FaceROI | null>(null);
   const [faceDetected, setFaceDetected] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
+  const [newSampleCount, setNewSampleCount] = useState(0);
   const [loadingMessage, setLoadingMessage] = useState('');
 
   const workerRef = useRef<Worker | null>(null);
   const rafRef = useRef<number>(0);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const processTimerRef = useRef<number>(0);
   const sampleCountRef = useRef(0);
   const lastTimestampRef = useRef(0);
   const fpsEstRef = useRef(30);
@@ -65,6 +66,7 @@ export function usePulseDetection(
       setConfidence(result.confidence);
       setQuality(result.quality);
       setWaveform(result.waveform);
+      setNewSampleCount(result.newSampleCount);
 
       if (result.smoothedBpm !== null) {
         setBpm(result.smoothedBpm);
@@ -169,18 +171,12 @@ export function usePulseDetection(
     // Reset worker buffer
     workerRef.current?.postMessage({ type: 'reset' } satisfies WorkerMessage);
 
-    // Start capture loop
+    // Start capture loop (process trigger is inside captureFrame)
     rafRef.current = requestAnimationFrame(captureFrame);
-
-    // Start periodic processing
-    processTimerRef.current = window.setInterval(() => {
-      workerRef.current?.postMessage({ type: 'process' } satisfies WorkerMessage);
-    }, PROCESS_INTERVAL_MS);
   }, [cameraActive, captureFrame]);
 
   const stop = useCallback(() => {
     cancelAnimationFrame(rafRef.current);
-    clearInterval(processTimerRef.current);
     setIsRunning(false);
     setState('idle');
     setBpm(null);
@@ -195,7 +191,6 @@ export function usePulseDetection(
   useEffect(() => {
     return () => {
       cancelAnimationFrame(rafRef.current);
-      clearInterval(processTimerRef.current);
       destroyFaceDetection();
     };
   }, []);
@@ -218,6 +213,7 @@ export function usePulseDetection(
     start,
     stop,
     isRunning,
+    newSampleCount,
     loadingMessage,
   };
 }

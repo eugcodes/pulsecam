@@ -117,6 +117,7 @@ export default function App() {
             <WaveformChart
               waveform={pulse.waveform}
               isActive={pulse.isRunning}
+              newSampleCount={pulse.newSampleCount}
             />
           </div>
         )}

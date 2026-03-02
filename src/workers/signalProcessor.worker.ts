@@ -13,6 +13,8 @@ let rgbBuffer: RGBSample[] = [];
 let roiHistory: Array<{ x: number; y: number }> = [];
 let faceDetected = false;
 let sampleRate = 30;
+let samplesSinceLastProcess = 0;
+let stableWindowSize = 0;
 
 // Smoothing for BPM
 const bpmHistory: number[] = [];
@@ -36,6 +38,7 @@ export interface WorkerResult {
   waveform: number[];
   bufferLength: number;
   sampleRate: number;
+  newSampleCount: number;
 }
 
 // Max buffer: ~15 seconds of data
@@ -63,6 +66,7 @@ self.onmessage = (e: MessageEvent<WorkerMessage>) => {
     case 'addSample': {
       if (msg.sample) {
         rgbBuffer.push(msg.sample);
+        samplesSinceLastProcess++;
         // Trim buffer
         const maxLen = Math.round(MAX_BUFFER_SECONDS * sampleRate);
         if (rgbBuffer.length > maxLen) {
@@ -93,10 +97,15 @@ self.onmessage = (e: MessageEvent<WorkerMessage>) => {
       roiHistory = [];
       bpmHistory.length = 0;
       bpmSmoothingState.prevBpm = null;
+      samplesSinceLastProcess = 0;
+      stableWindowSize = 0;
       break;
     }
 
     case 'process': {
+      const newSampleCount = samplesSinceLastProcess;
+      samplesSinceLastProcess = 0;
+
       const motionLevel = estimateMotion(roiHistory);
       let result: PulseResult | null = null;
 
@@ -115,8 +124,14 @@ self.onmessage = (e: MessageEvent<WorkerMessage>) => {
         smoothedBpm = Math.round(getSmoothedBpm(bpm));
       }
 
+      // Lock window size to prevent length fluctuations from sampleRate jitter.
+      const targetWindow = Math.round(sampleRate * 10);
+      if (stableWindowSize === 0 || Math.abs(targetWindow - stableWindowSize) > stableWindowSize * 0.15) {
+        stableWindowSize = targetWindow;
+      }
+
       const waveform = result?.waveform
-        ? Array.from(result.waveform.slice(-Math.round(sampleRate * 10)))
+        ? Array.from(result.waveform.slice(-stableWindowSize))
         : [];
 
       const response: WorkerResult = {
@@ -128,6 +143,7 @@ self.onmessage = (e: MessageEvent<WorkerMessage>) => {
         waveform,
         bufferLength: rgbBuffer.length,
         sampleRate,
+        newSampleCount,
       };
 
       self.postMessage(response);

@@ -20,7 +20,7 @@ export function CameraFeed({
   return (
     <div
       ref={containerRef}
-      className="relative w-full overflow-hidden rounded-xl bg-black"
+      className="relative w-full overflow-hidden rounded-xl bg-black sm:max-h-[50vh]"
       style={{ aspectRatio: '4/3', cursor: isActive ? 'pointer' : undefined }}
       onClick={isActive ? onToggleMeasure : undefined}
       role={isActive ? 'button' : undefined}

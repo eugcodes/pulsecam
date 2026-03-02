@@ -3,6 +3,7 @@ import { useEffect, useRef } from 'react';
 interface WaveformChartProps {
   waveform: number[];
   isActive: boolean;
+  newSampleCount: number;
 }
 
 const LINE_COLOR = '#2dd4bf';
@@ -22,10 +23,13 @@ const BG_COLOR = '#0d1117';
  *
  * **Drip-feed scrolling**: New samples are queued and drained one at a time
  * at the measured data arrival rate. A fractional accumulator provides
- * sub-pixel smoothness. The accumulator grows freely even when the queue
- * is temporarily empty — the identity x = i·step - sub·step is invariant
- * under draining (D samples drained → index becomes i−D, accumulator
- * becomes sub−D, same x), so catch-up drains produce zero visual jump.
+ * sub-pixel smoothness. The accumulator only grows while the queue has
+ * data; when the queue empties the waveform holds position, and when
+ * data resumes it continues smoothly from the held fractional offset.
+ *
+ * **Exact sample counts**: The worker reports exactly how many new
+ * samples were added (no time-based estimation), eliminating timing
+ * jitter from tab switching, GC pauses, or inconsistent frame rates.
  */
 
 const Y_MIN = -2.8;
@@ -33,7 +37,7 @@ const Y_MAX = 2.8;
 const Y_RANGE = Y_MAX - Y_MIN;
 const WINDOW_SEC = 10;
 
-export function WaveformChart({ waveform, isActive }: WaveformChartProps) {
+export function WaveformChart({ waveform, isActive, newSampleCount }: WaveformChartProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animRef = useRef<number>(0);
 
@@ -51,9 +55,12 @@ export function WaveformChart({ waveform, isActive }: WaveformChartProps) {
   const lastUpdateRef = useRef(0);
   // Measured data arrival rate (samples/sec), adapted via EMA.
   const arrivalRateRef = useRef(0);
+  // Latest exact sample count from the worker.
+  const newSampleCountRef = useRef(0);
 
   const isActiveRef = useRef(isActive);
   isActiveRef.current = isActive;
+  newSampleCountRef.current = newSampleCount;
 
   // When a new waveform snapshot arrives, queue only the new samples.
   useEffect(() => {
@@ -67,18 +74,22 @@ export function WaveformChart({ waveform, isActive }: WaveformChartProps) {
       displayBufRef.current = Float64Array.from(waveform);
       bufLenRef.current = waveform.length;
       lastFrameRef.current = now;
-    } else if (Math.abs(waveform.length - bufLenRef.current) > 2) {
+    } else if (Math.abs(waveform.length - bufLenRef.current) > bufLenRef.current * 0.1) {
       // Buffer size changed (early growth phase or sample-rate change): snap.
       displayBufRef.current = Float64Array.from(waveform);
       bufLenRef.current = waveform.length;
       pendingRef.current = [];
       subSampleRef.current = 0;
     } else {
-      // Stable size: estimate how many samples are new and queue them.
+      // Stable size: use exact sample count from worker.
+      const shift = newSampleCountRef.current;
+      if (shift <= 0) {
+        // No new data — don't update lastUpdateRef so the next
+        // elapsed measurement includes this gap.
+        return;
+      }
+
       const elapsed = lastUpdateRef.current > 0 ? now - lastUpdateRef.current : 0;
-      const shift = Math.max(1, Math.round(
-        (elapsed / (WINDOW_SEC * 1000)) * bufLenRef.current,
-      ));
 
       const startIdx = Math.max(0, waveform.length - shift);
       for (let i = startIdx; i < waveform.length; i++) {
@@ -86,7 +97,7 @@ export function WaveformChart({ waveform, isActive }: WaveformChartProps) {
       }
 
       // Adapt the drain rate to match actual arrival rate (EMA, α=0.3).
-      if (elapsed > 100 && shift > 0) {
+      if (elapsed > 100) {
         const instantRate = (shift / elapsed) * 1000;
         arrivalRateRef.current = arrivalRateRef.current > 0
           ? 0.7 * arrivalRateRef.current + 0.3 * instantRate
@@ -160,17 +171,12 @@ export function WaveformChart({ waveform, isActive }: WaveformChartProps) {
       const drainRate = arrivalRateRef.current || (bufLenRef.current / WINDOW_SEC);
       const pending = pendingRef.current;
 
-      // Always accumulate, even when the queue is briefly empty.
-      // The identity x = i·step − sub·step is invariant under draining:
-      //   (i−D)·step − (sub−D)·step = i·step − sub·step
-      // so catch-up drains when data resumes produce zero visual jump.
-      subSampleRef.current += (dt / 1000) * drainRate;
-
-      // Soft cap: if data stops entirely, pause after 2 seconds of coasting.
-      subSampleRef.current = Math.min(
-        subSampleRef.current,
-        bufLenRef.current * 0.2,
-      );
+      // Only accumulate when there's data to consume.  When the queue
+      // is empty the waveform holds position; when data resumes the
+      // accumulator continues from its fractional value — no jump.
+      if (pending.length > 0) {
+        subSampleRef.current += (dt / 1000) * drainRate;
+      }
 
       const toDrain = Math.min(
         Math.floor(subSampleRef.current),
