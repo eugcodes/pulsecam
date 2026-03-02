@@ -3,7 +3,7 @@
  * Keeps heavy computation off the UI thread.
  */
 
-import { processRPPG } from '../lib/rppg';
+import { processRPPG, createBpmSmoothingState } from '../lib/rppg';
 import type { RGBSample, PulseResult } from '../lib/rppg';
 import { assessSignalQuality, estimateMotion } from '../lib/signalQuality';
 import type { SignalQualityResult } from '../lib/signalQuality';
@@ -17,6 +17,7 @@ let sampleRate = 30;
 // Smoothing for BPM
 const bpmHistory: number[] = [];
 const BPM_SMOOTH_WINDOW = 5;
+const bpmSmoothingState = createBpmSmoothingState();
 
 export interface WorkerMessage {
   type: 'addSample' | 'setFaceDetected' | 'setSampleRate' | 'reset' | 'process';
@@ -91,6 +92,7 @@ self.onmessage = (e: MessageEvent<WorkerMessage>) => {
       rgbBuffer = [];
       roiHistory = [];
       bpmHistory.length = 0;
+      bpmSmoothingState.prevBpm = null;
       break;
     }
 
@@ -99,7 +101,7 @@ self.onmessage = (e: MessageEvent<WorkerMessage>) => {
       let result: PulseResult | null = null;
 
       if (faceDetected && rgbBuffer.length > sampleRate * 3) {
-        result = processRPPG(rgbBuffer, sampleRate);
+        result = processRPPG(rgbBuffer, sampleRate, bpmSmoothingState);
       }
 
       const confidence = result?.confidence ?? 0;

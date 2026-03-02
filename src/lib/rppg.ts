@@ -7,10 +7,10 @@
  */
 
 import {
-  detrend,
+  detrendMovingAverage,
   normalize,
   butterworthBandpass,
-  filterSignal,
+  filtfiltSignal,
   dominantFrequency,
 } from './filters';
 
@@ -30,6 +30,15 @@ export interface PulseResult {
   sampleRate: number;
 }
 
+/** Persistent state for temporal BPM smoothing across frames. */
+export interface BpmSmoothingState {
+  prevBpm: number | null;
+}
+
+export function createBpmSmoothingState(): BpmSmoothingState {
+  return { prevBpm: null };
+}
+
 const MIN_HR_HZ = 0.7; // 42 BPM
 const MAX_HR_HZ = 4.0; // 240 BPM
 const POS_WINDOW_SEC = 1.6; // POS temporal window
@@ -46,42 +55,8 @@ export function posAlgorithm(
   if (n < 3) return new Float64Array(0);
 
   const windowLen = Math.round(POS_WINDOW_SEC * sampleRate);
-  const H = new Float64Array(n);
 
-  for (let t = 0; t < n; t++) {
-    const start = Math.max(0, t - windowLen + 1);
-    const end = t + 1;
-    const len = end - start;
-
-    // Compute temporal mean of RGB in window
-    let meanR = 0, meanG = 0, meanB = 0;
-    for (let i = start; i < end; i++) {
-      meanR += rgbBuffer[i].r;
-      meanG += rgbBuffer[i].g;
-      meanB += rgbBuffer[i].b;
-    }
-    meanR /= len;
-    meanG /= len;
-    meanB /= len;
-
-    // Avoid division by zero
-    if (meanR < 1e-6 || meanG < 1e-6 || meanB < 1e-6) continue;
-
-    // Normalize Cn = [R/meanR, G/meanG, B/meanB] for current sample
-    const cn_r = rgbBuffer[t].r / meanR;
-    const cn_g = rgbBuffer[t].g / meanG;
-    const cn_b = rgbBuffer[t].b / meanB;
-
-    // POS projection: S1 = Cn_g - Cn_b, S2 = Cn_g + Cn_b - 2*Cn_r
-    const s1 = cn_g - cn_b;
-    const s2 = cn_g + cn_b - 2 * cn_r;
-
-    // Combine: H(t) = S1 + alpha * S2, where alpha = std(S1)/std(S2)
-    // For per-sample, approximate with the window stats
-    H[t] = s1; // Initial estimate, refined below
-  }
-
-  // Compute in overlapping windows for alpha
+  // Overlap-add in sliding windows (Wang et al. 2017)
   const result = new Float64Array(n);
   const wLen = Math.max(windowLen, 10);
 
@@ -89,31 +64,28 @@ export function posAlgorithm(
     const end = Math.min(start + wLen, n);
     const len = end - start;
 
-    // Compute S1, S2 arrays for this window
+    // T5: Single per-window mean for temporal normalization
+    // (matches Wang et al. 2017 pseudocode and pyVHR/rPPG-Toolbox implementations)
+    let mR = 0, mG = 0, mB = 0;
+    for (let i = 0; i < len; i++) {
+      mR += rgbBuffer[start + i].r;
+      mG += rgbBuffer[start + i].g;
+      mB += rgbBuffer[start + i].b;
+    }
+    mR /= len;
+    mG /= len;
+    mB /= len;
+
+    if (mR < 1e-6 || mG < 1e-6 || mB < 1e-6) continue;
+
+    // Normalize all samples in window by the single window mean, then project
     const S1 = new Float64Array(len);
     const S2 = new Float64Array(len);
 
     for (let i = 0; i < len; i++) {
-      const idx = start + i;
-      // Temporal mean for normalization
-      const wStart = Math.max(0, idx - windowLen + 1);
-      const wEnd = idx + 1;
-      const wLen2 = wEnd - wStart;
-      let mR = 0, mG = 0, mB = 0;
-      for (let j = wStart; j < wEnd; j++) {
-        mR += rgbBuffer[j].r;
-        mG += rgbBuffer[j].g;
-        mB += rgbBuffer[j].b;
-      }
-      mR /= wLen2;
-      mG /= wLen2;
-      mB /= wLen2;
-
-      if (mR < 1e-6 || mG < 1e-6 || mB < 1e-6) continue;
-
-      const cr = rgbBuffer[idx].r / mR;
-      const cg = rgbBuffer[idx].g / mG;
-      const cb = rgbBuffer[idx].b / mB;
+      const cr = rgbBuffer[start + i].r / mR;
+      const cg = rgbBuffer[start + i].g / mG;
+      const cb = rgbBuffer[start + i].b / mB;
 
       S1[i] = cg - cb;
       S2[i] = cg + cb - 2 * cr;
@@ -138,9 +110,18 @@ export function posAlgorithm(
 
     const alpha = stdS2 > 1e-10 ? stdS1 / stdS2 : 1;
 
-    // Combine with overlap-add
+    // T6: Mean-subtract h before overlap-add (per iPhys / McDuff)
+    // Prevents DC accumulation across overlapping windows
+    const h = new Float64Array(len);
+    let hMean = 0;
     for (let i = 0; i < len; i++) {
-      result[start + i] += S1[i] + alpha * S2[i];
+      h[i] = S1[i] + alpha * S2[i];
+      hMean += h[i];
+    }
+    hMean /= len;
+
+    for (let i = 0; i < len; i++) {
+      result[start + i] += h[i] - hMean;
     }
   }
 
@@ -150,13 +131,15 @@ export function posAlgorithm(
 /**
  * Full rPPG processing pipeline:
  * 1. POS algorithm
- * 2. Detrending
- * 3. Bandpass filtering
- * 4. FFT-based BPM estimation
+ * 2. Moving-average detrending
+ * 3. Zero-phase bandpass filtering
+ * 4. Hann-windowed FFT with parabolic interpolation
+ * 5. Temporal BPM smoothing (EMA)
  */
 export function processRPPG(
   rgbBuffer: RGBSample[],
   sampleRate: number,
+  smoothingState?: BpmSmoothingState,
 ): PulseResult | null {
   if (rgbBuffer.length < sampleRate * 3) return null;
 
@@ -164,17 +147,19 @@ export function processRPPG(
   const rawPulse = posAlgorithm(rgbBuffer, sampleRate);
   if (rawPulse.length === 0) return null;
 
-  // 2. Detrend (remove slow drift)
-  const detrended = detrend(rawPulse);
+  // 2. Detrend (remove slow drift via moving-average subtraction)
+  // Window of 2.5s → high-pass cutoff ~0.18 Hz, well below HR band (0.7+ Hz)
+  const detrendWindow = Math.round(sampleRate * 2.5);
+  const detrended = detrendMovingAverage(rawPulse, detrendWindow);
 
-  // 3. Bandpass filter (0.7–4.0 Hz = 42–240 BPM)
+  // 3. Bandpass filter (0.7–4.0 Hz = 42–240 BPM), zero-phase (filtfilt)
   const coeffs = butterworthBandpass(MIN_HR_HZ, MAX_HR_HZ, sampleRate);
-  const filtered = filterSignal(detrended, coeffs);
+  const filtered = filtfiltSignal(detrended, coeffs);
 
   // 4. Normalize for display
   const waveform = normalize(filtered);
 
-  // 5. FFT-based frequency estimation
+  // 5. FFT-based frequency estimation (Hann-windowed)
   const { frequency, magnitude, spectrum } = dominantFrequency(
     filtered,
     sampleRate,
@@ -182,7 +167,7 @@ export function processRPPG(
     MAX_HR_HZ,
   );
 
-  const bpm = frequency * 60;
+  let bpm = frequency * 60;
 
   // 6. Confidence: ratio of peak to mean spectral power in band
   const N = spectrum.length;
@@ -197,6 +182,16 @@ export function processRPPG(
   const meanPower = count > 0 ? totalPower / count : 1;
   const snr = meanPower > 0 ? magnitude / meanPower : 0;
   const confidence = Math.min(1, Math.max(0, (snr - 1.5) / 5));
+
+  // 7. Temporal BPM smoothing (EMA, alpha=0.25 → ~4-frame smoothing)
+  if (smoothingState) {
+    if (smoothingState.prevBpm !== null && confidence > 0.1) {
+      bpm = 0.25 * bpm + 0.75 * smoothingState.prevBpm;
+    }
+    if (confidence > 0.1) {
+      smoothingState.prevBpm = bpm;
+    }
+  }
 
   return {
     bpm: Math.round(bpm * 10) / 10,

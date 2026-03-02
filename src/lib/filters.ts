@@ -69,8 +69,14 @@ export function dominantFrequency(
   minHz: number,
   maxHz: number,
 ): { frequency: number; magnitude: number; spectrum: Float64Array } {
-  const N = nextPow2(signal.length);
-  const mag = fft(signal);
+  // Apply Hann window to reduce spectral leakage (Gasior & Gonzalez, 2004)
+  const windowed = new Float64Array(signal.length);
+  for (let i = 0; i < signal.length; i++) {
+    windowed[i] = signal[i] * (0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (signal.length - 1)));
+  }
+
+  const N = nextPow2(windowed.length);
+  const mag = fft(windowed);
 
   const minBin = Math.max(1, Math.floor((minHz * N) / sampleRate));
   const maxBin = Math.min(mag.length - 1, Math.ceil((maxHz * N) / sampleRate));
@@ -166,7 +172,7 @@ export function biquadFilter(
   return y;
 }
 
-/** Apply biquad filter to entire signal array. */
+/** Apply biquad filter to entire signal array (single forward pass). */
 export function filterSignal(
   signal: Float64Array,
   coeffs: BiquadCoeffs,
@@ -177,6 +183,54 @@ export function filterSignal(
     out[i] = biquadFilter(signal[i], coeffs, state);
   }
   return out;
+}
+
+/**
+ * Zero-phase (forward-backward) biquad filter.
+ * Equivalent to scipy.signal.filtfilt for a single biquad section.
+ * Applies the filter forward, then reverses and filters again,
+ * canceling phase distortion. Effective order is doubled.
+ */
+export function filtfiltSignal(
+  signal: Float64Array,
+  coeffs: BiquadCoeffs,
+): Float64Array {
+  const n = signal.length;
+  if (n === 0) return new Float64Array(0);
+
+  // Reflect-pad edges to reduce transients (3 * filter order = 6 samples)
+  const padLen = Math.min(6, n - 1);
+  const padded = new Float64Array(n + 2 * padLen);
+
+  // Left reflection: 2*signal[0] - signal[padLen], ..., 2*signal[0] - signal[1]
+  for (let i = 0; i < padLen; i++) {
+    padded[i] = 2 * signal[0] - signal[padLen - i];
+  }
+  // Center: original signal
+  for (let i = 0; i < n; i++) {
+    padded[padLen + i] = signal[i];
+  }
+  // Right reflection: 2*signal[n-1] - signal[n-2], ..., 2*signal[n-1] - signal[n-1-padLen]
+  for (let i = 0; i < padLen; i++) {
+    padded[padLen + n + i] = 2 * signal[n - 1] - signal[n - 2 - i];
+  }
+
+  // Forward pass
+  const forward = new Float64Array(padded.length);
+  const stateF = createFilterState();
+  for (let i = 0; i < padded.length; i++) {
+    forward[i] = biquadFilter(padded[i], coeffs, stateF);
+  }
+
+  // Backward pass (reverse, filter, reverse)
+  const backward = new Float64Array(padded.length);
+  const stateB = createFilterState();
+  for (let i = padded.length - 1; i >= 0; i--) {
+    backward[i] = biquadFilter(forward[i], coeffs, stateB);
+  }
+
+  // Strip padding
+  return backward.slice(padLen, padLen + n);
 }
 
 // ─── Detrending ──────────────────────────────────────────────────────────────
