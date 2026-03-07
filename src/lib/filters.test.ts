@@ -482,6 +482,142 @@ describe('detrendMovingAverage', () => {
     const outStd = std(out);
     expect(outStd / origStd).toBeGreaterThan(0.8);
   });
+
+  // ── Edge cases ──────────────────────────────────────────────────────────────
+
+  it('handles window size = 1 (output equals zero everywhere)', () => {
+    const sig = new Float64Array([3, 7, 1, 9, 5]);
+    const out = detrendMovingAverage(sig, 1);
+    // Window covers only the sample itself → mean = sample → output = 0
+    for (let i = 0; i < sig.length; i++) {
+      expect(out[i]).toBeCloseTo(0, 10);
+    }
+  });
+
+  it('handles window size = 2 (even window)', () => {
+    // half = floor(2/2) = 1, so window spans [i-1, i+1] in interior
+    const sig = new Float64Array([10, 20, 30, 40, 50]);
+    const out = detrendMovingAverage(sig, 2);
+    // Each output should be signal[i] minus the local average
+    expect(out.length).toBe(5);
+    // Just verify it produces finite, non-NaN values and removes trend
+    for (let i = 0; i < out.length; i++) {
+      expect(Number.isFinite(out[i])).toBe(true);
+    }
+  });
+
+  it('handles window larger than signal length', () => {
+    const sig = new Float64Array([1, 2, 3, 4, 5]);
+    const out = detrendMovingAverage(sig, 100);
+    // Every sample's window covers the full signal → subtract global mean (3)
+    const globalMean = 3;
+    for (let i = 0; i < sig.length; i++) {
+      expect(out[i]).toBeCloseTo(sig[i] - globalMean, 10);
+    }
+  });
+
+  it('handles single-element signal', () => {
+    const sig = new Float64Array([42]);
+    const out = detrendMovingAverage(sig, 5);
+    expect(out.length).toBe(1);
+    expect(out[0]).toBeCloseTo(0, 10);
+  });
+
+  it('handles two-element signal', () => {
+    const sig = new Float64Array([10, 20]);
+    const out = detrendMovingAverage(sig, 3);
+    expect(out.length).toBe(2);
+    // Window covers full signal for both → mean = 15
+    expect(out[0]).toBeCloseTo(-5, 10);
+    expect(out[1]).toBeCloseTo(5, 10);
+  });
+
+  it('returns correct length and preserves output type', () => {
+    const sig = new Float64Array(500);
+    for (let i = 0; i < 500; i++) sig[i] = Math.random() * 100 - 50;
+    const out = detrendMovingAverage(sig, 31);
+    expect(out).toBeInstanceOf(Float64Array);
+    expect(out.length).toBe(500);
+  });
+
+  it('edge samples use truncated windows correctly', () => {
+    // First and last samples have smaller windows (edge truncation).
+    // For sig = [10, 20, 30, 40, 50] with windowSize = 5 (half = 2):
+    //   i=0: window [0,2] → mean = (10+20+30)/3 = 20     → out = -10
+    //   i=1: window [0,3] → mean = (10+20+30+40)/4 = 25  → out = -5
+    //   i=2: window [0,4] → mean = (10+20+30+40+50)/5=30 → out = 0
+    //   i=3: window [1,4] → mean = (20+30+40+50)/4 = 35  → out = 5
+    //   i=4: window [2,4] → mean = (30+40+50)/3 ≈ 40     → out = 10
+    const sig = new Float64Array([10, 20, 30, 40, 50]);
+    const out = detrendMovingAverage(sig, 5);
+    expect(out[0]).toBeCloseTo(-10, 10);
+    expect(out[1]).toBeCloseTo(-5, 10);
+    expect(out[2]).toBeCloseTo(0, 10);
+    expect(out[3]).toBeCloseTo(5, 10);
+    expect(out[4]).toBeCloseTo(10, 10);
+  });
+
+  it('removes linear ramp completely in the interior', () => {
+    const n = 500;
+    const sig = new Float64Array(n);
+    for (let i = 0; i < n; i++) sig[i] = i; // 0, 1, 2, ..., 499
+    const ws = 51;
+    const out = detrendMovingAverage(sig, ws);
+    const half = Math.floor(ws / 2);
+    // Interior samples (away from edges) should be ~0
+    for (let i = half; i < n - half; i++) {
+      expect(Math.abs(out[i])).toBeLessThan(1e-10);
+    }
+  });
+
+  it('handles all-zero signal', () => {
+    const sig = new Float64Array(100).fill(0);
+    const out = detrendMovingAverage(sig, 21);
+    for (let i = 0; i < 100; i++) {
+      expect(out[i]).toBe(0);
+    }
+  });
+
+  it('handles negative values', () => {
+    const sig = new Float64Array(100);
+    for (let i = 0; i < 100; i++) sig[i] = -50 + Math.sin(i * 0.5);
+    const out = detrendMovingAverage(sig, 21);
+    // Should remove the -50 offset; interior mean should be near zero
+    const interior = out.slice(21, 79);
+    expect(Math.abs(mean(interior))).toBeLessThan(1);
+  });
+
+  it('handles very large window (odd) on moderate signal', () => {
+    const n = 50;
+    const sig = new Float64Array(n);
+    for (let i = 0; i < n; i++) sig[i] = i * i; // quadratic
+    const out = detrendMovingAverage(sig, 999);
+    // Window covers entire signal → subtract global mean
+    const gm = mean(sig);
+    for (let i = 0; i < n; i++) {
+      expect(out[i]).toBeCloseTo(sig[i] - gm, 8);
+    }
+  });
+
+  it('matches known output for realistic rPPG-sized input', () => {
+    // Simulate 10 seconds at 30 FPS with drift + pulse
+    const fs = 30;
+    const n = 300;
+    const sig = new Float64Array(n);
+    for (let i = 0; i < n; i++) {
+      sig[i] = 0.5 * (i / n) // linear drift
+             + 0.1 * Math.sin(2 * Math.PI * 1.2 * i / fs) // 72 BPM pulse
+             + 0.02 * Math.sin(2 * Math.PI * 0.25 * i / fs); // breathing
+    }
+    const out = detrendMovingAverage(sig, 75);
+    // Drift should be removed; 1.2 Hz pulse preserved
+    const freq = dominantFrequency(out, fs, 0.5, 4.0);
+    expect(freq.frequency).toBeCloseTo(1.2, 0);
+    // Output should be bounded (no explosions)
+    for (let i = 0; i < n; i++) {
+      expect(Math.abs(out[i])).toBeLessThan(1);
+    }
+  });
 });
 
 // ─── normalize ───────────────────────────────────────────────────────────────

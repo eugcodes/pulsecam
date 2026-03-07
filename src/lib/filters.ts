@@ -267,13 +267,16 @@ export function detrendMovingAverage(
   const out = new Float64Array(n);
   const half = Math.floor(windowSize / 2);
 
+  // Prefix sum: O(1) window sum instead of O(w) inner loop.
+  const prefix = new Float64Array(n + 1);
+  for (let i = 0; i < n; i++) {
+    prefix[i + 1] = prefix[i] + signal[i];
+  }
+
   for (let i = 0; i < n; i++) {
     const start = Math.max(0, i - half);
     const end = Math.min(n - 1, i + half);
-    let sum = 0;
-    for (let j = start; j <= end; j++) {
-      sum += signal[j];
-    }
+    const sum = prefix[end + 1] - prefix[start];
     out[i] = signal[i] - sum / (end - start + 1);
   }
   return out;
