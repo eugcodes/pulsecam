@@ -51,11 +51,7 @@ export function Controls({
       {/* Camera toggle */}
       <button
         onClick={cameraActive ? onStopCamera : onStartCamera}
-        className={`flex h-[46px] w-[46px] shrink-0 items-center justify-center rounded-xl border transition-colors ${
-          cameraActive
-            ? 'border-border/60 text-text-secondary/60 hover:bg-bg-secondary hover:text-text-secondary'
-            : 'border-border/60 text-text-secondary/60 hover:bg-bg-secondary hover:text-text-secondary'
-        }`}
+        className="flex h-[46px] w-[46px] shrink-0 items-center justify-center rounded-xl border transition-colors border-border/60 text-text-secondary/60 hover:bg-bg-secondary hover:text-text-secondary"
         aria-label={cameraActive ? 'Turn off camera' : 'Turn on camera'}
         title={cameraActive ? 'Turn off camera' : 'Turn on camera'}
       >
@@ -82,25 +78,11 @@ export function Controls({
       {/* Camera selector — always visible when camera is active so users know they can switch */}
       {cameraActive && devices.length > 0 && (
         <div className="relative flex items-center">
-          {/* Camera switch icon */}
-          <svg
-            className="pointer-events-none absolute left-3 h-4 w-4 text-text-secondary/60"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            strokeWidth={1.5}
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.992 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182M21.015 4.356v4.992"
-            />
-          </svg>
           <select
             value={selectedDevice}
             onChange={(e) => onSelectDevice(e.target.value)}
             disabled={devices.length <= 1}
-            className={`h-[46px] appearance-none rounded-xl border border-border/60 bg-transparent py-0 pl-9 pr-7 text-sm text-text-secondary transition-colors focus:outline-none focus:ring-2 focus:ring-accent ${
+            className={`h-[46px] appearance-none rounded-xl border border-border/60 bg-transparent py-0 pl-3 pr-7 text-sm text-text-secondary transition-colors focus:outline-none focus:ring-2 focus:ring-accent ${
               devices.length > 1
                 ? 'cursor-pointer hover:bg-bg-secondary'
                 : 'cursor-default opacity-60'

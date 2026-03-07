@@ -1,5 +1,3 @@
-import { useRef } from 'react';
-
 interface CameraFeedProps {
   videoRef: React.RefObject<HTMLVideoElement | null>;
   faceDetected: boolean;
@@ -15,11 +13,8 @@ export function CameraFeed({
   isRunning,
   onToggleMeasure,
 }: CameraFeedProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
-
   return (
     <div
-      ref={containerRef}
       className="relative w-full overflow-hidden rounded-xl bg-black sm:max-h-[50vh] lg:max-h-[40vh]"
       style={{ aspectRatio: '4/3', cursor: isActive ? 'pointer' : undefined }}
       onClick={isActive ? onToggleMeasure : undefined}

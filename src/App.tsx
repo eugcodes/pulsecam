@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState } from 'react';
 import { useCamera } from './hooks/useCamera';
 import { usePulseDetection } from './hooks/usePulseDetection';
 import { CameraFeed } from './components/CameraFeed';
@@ -13,30 +13,15 @@ export default function App() {
   const pulse = usePulseDetection(camera.videoRef, camera.isActive);
   const [showHelp, setShowHelp] = useState(false);
 
-  const handleStartCamera = useCallback(async () => {
-    await camera.start();
-  }, [camera]);
-
-  const handleStopCamera = useCallback(() => {
+  const handleStopCamera = () => {
     pulse.stop();
     camera.stop();
-  }, [camera, pulse]);
+  };
 
-  const handleStartMeasure = useCallback(() => {
-    pulse.start();
-  }, [pulse]);
-
-  const handleStopMeasure = useCallback(() => {
-    pulse.stop();
-  }, [pulse]);
-
-  const handleToggleMeasure = useCallback(() => {
-    if (pulse.isRunning) {
-      pulse.stop();
-    } else {
-      pulse.start();
-    }
-  }, [pulse]);
+  const handleToggleMeasure = () => {
+    if (pulse.isRunning) pulse.stop();
+    else pulse.start();
+  };
 
   return (
     <div className="flex min-h-screen flex-col bg-bg-primary">
@@ -88,10 +73,10 @@ export default function App() {
           <Controls
             isRunning={pulse.isRunning}
             cameraActive={camera.isActive}
-            onStartCamera={handleStartCamera}
+            onStartCamera={camera.start}
             onStopCamera={handleStopCamera}
-            onStartMeasure={handleStartMeasure}
-            onStopMeasure={handleStopMeasure}
+            onStartMeasure={pulse.start}
+            onStopMeasure={pulse.stop}
             devices={camera.devices}
             selectedDevice={camera.selectedDevice}
             onSelectDevice={camera.selectDevice}

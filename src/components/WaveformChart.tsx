@@ -59,8 +59,10 @@ export function WaveformChart({ waveform, isActive, newSampleCount }: WaveformCh
   const newSampleCountRef = useRef(0);
 
   const isActiveRef = useRef(isActive);
-  isActiveRef.current = isActive;
-  newSampleCountRef.current = newSampleCount;
+  useEffect(() => {
+    isActiveRef.current = isActive;
+    newSampleCountRef.current = newSampleCount;
+  }, [isActive, newSampleCount]);
 
   // When a new waveform snapshot arrives, queue only the new samples.
   useEffect(() => {
@@ -248,7 +250,6 @@ export function WaveformChart({ waveform, isActive, newSampleCount }: WaveformCh
 
     draw();
     return () => cancelAnimationFrame(animRef.current);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (

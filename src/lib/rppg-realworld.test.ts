@@ -71,14 +71,6 @@ function expectBpmNear(result: ReturnType<typeof processRPPG>, expectedBpm: numb
   expect(result.bpm).toBeLessThan(expectedBpm + tolerance);
 }
 
-/** Helper: Gaussian noise */
-function gaussianNoise(sigma: number): number {
-  // Box-Muller transform
-  const u1 = Math.random() || 1e-10;
-  const u2 = Math.random();
-  return sigma * Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
-}
-
 // Use deterministic seed for reproducibility
 let seed = 42;
 function seededRandom(): number {
@@ -577,7 +569,6 @@ describe('processRPPG: subject variability', () => {
     for (let i = 0; i < n; i++) {
       const t = i / sampleRate;
       // HR decreases linearly from 150 to 80 BPM over 12 seconds
-      const currentHz = (150 - (70 * t) / duration) / 60;
       // Integrate instantaneous frequency for correct phase
       const phase = 2 * Math.PI * ((150 / 60) * t - (70 / 60 / duration) * t * t / 2);
       const pulse = 0.03 * Math.sin(phase);

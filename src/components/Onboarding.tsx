@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 
 const STORAGE_KEY = 'pulsecam-onboarding-dismissed';
 
@@ -8,18 +8,9 @@ interface OnboardingProps {
 }
 
 export function Onboarding({ forceShow, onDismiss }: OnboardingProps) {
-  const [visible, setVisible] = useState(false);
-
-  useEffect(() => {
-    if (forceShow) {
-      setVisible(true);
-      return;
-    }
-    const dismissed = localStorage.getItem(STORAGE_KEY);
-    if (!dismissed) {
-      setVisible(true);
-    }
-  }, [forceShow]);
+  const [visible, setVisible] = useState(
+    () => forceShow || !localStorage.getItem(STORAGE_KEY),
+  );
 
   const dismiss = () => {
     setVisible(false);

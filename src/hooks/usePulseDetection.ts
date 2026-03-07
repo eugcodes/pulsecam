@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useReducer, useEffect, useRef, useCallback } from 'react';
 import { initFaceDetection, detectFace, extractROIColors, destroyFaceDetection } from '../lib/faceDetection';
 import type { FaceROI } from '../lib/faceDetection';
 import type { WorkerMessage, WorkerResult } from '../workers/signalProcessor.worker';
@@ -22,26 +22,87 @@ export interface PulseDetectionResult {
 }
 
 const PROCESS_INTERVAL_MS = 250; // Process every 250ms for faster convergence
-const CALIBRATION_SAMPLES = 90; // ~3 seconds at 30fps
+
+// ─── Reducer ─────────────────────────────────────────────────────────────────
+
+interface PulseState {
+  state: MeasurementState;
+  bpm: number | null;
+  confidence: number;
+  quality: SignalQualityResult;
+  waveform: number[];
+  faceROI: FaceROI | null;
+  faceDetected: boolean;
+  isRunning: boolean;
+  newSampleCount: number;
+  loadingMessage: string;
+}
+
+type PulseAction =
+  | { type: 'startLoading' }
+  | { type: 'loadFailed' }
+  | { type: 'calibrating' }
+  | { type: 'workerResult'; confidence: number; quality: SignalQualityResult; waveform: number[]; newSampleCount: number; smoothedBpm: number | null; bufferLength: number }
+  | { type: 'faceUpdate'; roi: FaceROI | null }
+  | { type: 'stop' };
+
+const INITIAL_STATE: PulseState = {
+  state: 'idle',
+  bpm: null,
+  confidence: 0,
+  quality: { level: 'poor', score: 0, message: 'Not started.' },
+  waveform: [],
+  faceROI: null,
+  faceDetected: false,
+  isRunning: false,
+  newSampleCount: 0,
+  loadingMessage: '',
+};
+
+function pulseReducer(s: PulseState, a: PulseAction): PulseState {
+  switch (a.type) {
+    case 'startLoading':
+      return { ...s, state: 'loading', loadingMessage: 'Loading face detection model...', bpm: null, confidence: 0 };
+    case 'loadFailed':
+      return { ...s, state: 'idle', loadingMessage: '' };
+    case 'calibrating':
+      return { ...s, state: 'calibrating', loadingMessage: '', isRunning: true };
+    case 'workerResult': {
+      const next: Partial<PulseState> = {
+        confidence: a.confidence,
+        quality: a.quality,
+        waveform: a.waveform,
+        newSampleCount: a.newSampleCount,
+      };
+      if (a.smoothedBpm !== null) {
+        next.bpm = a.smoothedBpm;
+        next.state = 'measuring';
+      }
+      return { ...s, ...next };
+    }
+    case 'faceUpdate': {
+      // Skip update if ROI fields haven't changed (avoids re-render every rAF frame)
+      const prev = s.faceROI;
+      const roi = a.roi;
+      const detected = roi !== null;
+      if (detected === s.faceDetected && prev === roi) return s;
+      if (prev && roi && prev.x === roi.x && prev.y === roi.y && prev.width === roi.width && prev.height === roi.height) {
+        if (detected === s.faceDetected) return s;
+      }
+      return { ...s, faceROI: roi, faceDetected: detected };
+    }
+    case 'stop':
+      return { ...INITIAL_STATE };
+  }
+}
+
+// ─── Hook ────────────────────────────────────────────────────────────────────
 
 export function usePulseDetection(
   videoRef: React.RefObject<HTMLVideoElement | null>,
   cameraActive: boolean,
 ): PulseDetectionResult {
-  const [state, setState] = useState<MeasurementState>('idle');
-  const [bpm, setBpm] = useState<number | null>(null);
-  const [confidence, setConfidence] = useState(0);
-  const [quality, setQuality] = useState<SignalQualityResult>({
-    level: 'poor',
-    score: 0,
-    message: 'Not started.',
-  });
-  const [waveform, setWaveform] = useState<number[]>([]);
-  const [faceROI, setFaceROI] = useState<FaceROI | null>(null);
-  const [faceDetected, setFaceDetected] = useState(false);
-  const [isRunning, setIsRunning] = useState(false);
-  const [newSampleCount, setNewSampleCount] = useState(0);
-  const [loadingMessage, setLoadingMessage] = useState('');
+  const [s, dispatch] = useReducer(pulseReducer, INITIAL_STATE);
 
   const workerRef = useRef<Worker | null>(null);
   const rafRef = useRef<number>(0);
@@ -64,17 +125,15 @@ export function usePulseDetection(
       const result = e.data;
       if (result.type !== 'result') return;
 
-      setConfidence(result.confidence);
-      setQuality(result.quality);
-      setWaveform(result.waveform);
-      setNewSampleCount(result.newSampleCount);
-
-      if (result.smoothedBpm !== null) {
-        setBpm(result.smoothedBpm);
-        setState('measuring');
-      } else if (result.bufferLength > CALIBRATION_SAMPLES) {
-        setState((s) => (s === 'calibrating' ? 'calibrating' : s));
-      }
+      dispatch({
+        type: 'workerResult',
+        confidence: result.confidence,
+        quality: result.quality,
+        waveform: result.waveform,
+        newSampleCount: result.newSampleCount,
+        smoothedBpm: result.smoothedBpm,
+        bufferLength: result.bufferLength,
+      });
     };
 
     canvasRef.current = document.createElement('canvas');
@@ -85,102 +144,97 @@ export function usePulseDetection(
     };
   }, []);
 
-  // Main capture loop
-  const captureFrame = useCallback(() => {
-    const video = videoRef.current;
-    if (!video || !workerRef.current || !canvasRef.current) return;
-    if (video.readyState < 2) {
-      rafRef.current = requestAnimationFrame(captureFrame);
-      return;
-    }
+  // Main capture loop stored in a ref so start() can kick it off
+  const captureFrameRef = useRef<() => void>(undefined);
+  useEffect(() => {
+    captureFrameRef.current = () => {
+      const video = videoRef.current;
+      if (!video || !workerRef.current || !canvasRef.current) return;
+      if (video.readyState < 2) {
+        rafRef.current = requestAnimationFrame(() => captureFrameRef.current?.());
+        return;
+      }
 
-    const now = performance.now();
+      const now = performance.now();
 
-    // FPS estimation
-    frameCountRef.current++;
-    if (fpsTimerStartRef.current === 0) {
-      fpsTimerStartRef.current = now;
-    } else if (now - fpsTimerStartRef.current > 2000) {
-      fpsEstRef.current =
-        (frameCountRef.current * 1000) / (now - fpsTimerStartRef.current);
-      frameCountRef.current = 0;
-      fpsTimerStartRef.current = now;
+      // FPS estimation
+      frameCountRef.current++;
+      if (fpsTimerStartRef.current === 0) {
+        fpsTimerStartRef.current = now;
+      } else if (now - fpsTimerStartRef.current > 2000) {
+        fpsEstRef.current =
+          (frameCountRef.current * 1000) / (now - fpsTimerStartRef.current);
+        frameCountRef.current = 0;
+        fpsTimerStartRef.current = now;
+        workerRef.current.postMessage({
+          type: 'setSampleRate',
+          sampleRate: Math.round(fpsEstRef.current),
+        } satisfies WorkerMessage);
+      }
+
+      // Face detection — run every other frame and reuse last ROI on skipped frames.
+      // Face position changes slowly; 15 detections/sec is sufficient for ROI tracking.
+      let roi: FaceROI | null;
+      if (frameCountRef.current % 2 === 0 || !lastRoiRef.current) {
+        roi = detectFace(video, now);
+        lastRoiRef.current = roi;
+      } else {
+        roi = lastRoiRef.current;
+      }
+      dispatch({ type: 'faceUpdate', roi });
+      const detected = roi !== null;
+
+      // Extract ROI colors and send batched frame message to worker
+      const colors = roi ? extractROIColors(video, roi, canvasRef.current) : null;
+      if (colors) sampleCountRef.current++;
+
+      const shouldProcess = now - lastTimestampRef.current > PROCESS_INTERVAL_MS;
+      if (shouldProcess) lastTimestampRef.current = now;
+
       workerRef.current.postMessage({
-        type: 'setSampleRate',
-        sampleRate: Math.round(fpsEstRef.current),
+        type: 'frame',
+        faceDetected: detected,
+        sample: colors ? { ...colors, timestamp: now } : undefined,
+        roiCenter: roi ? { x: roi.x + roi.width / 2, y: roi.y + roi.height / 2 } : undefined,
+        shouldProcess,
       } satisfies WorkerMessage);
-    }
 
-    // Face detection — run every other frame and reuse last ROI on skipped frames.
-    // Face position changes slowly; 15 detections/sec is sufficient for ROI tracking.
-    let roi: FaceROI | null;
-    if (frameCountRef.current % 2 === 0 || !lastRoiRef.current) {
-      roi = detectFace(video, now);
-      lastRoiRef.current = roi;
-    } else {
-      roi = lastRoiRef.current;
-    }
-    setFaceROI(roi);
-    const detected = roi !== null;
-    setFaceDetected(detected);
-
-    // Extract ROI colors and send batched frame message to worker
-    const colors = roi ? extractROIColors(video, roi, canvasRef.current) : null;
-    if (colors) sampleCountRef.current++;
-
-    const shouldProcess = now - lastTimestampRef.current > PROCESS_INTERVAL_MS;
-    if (shouldProcess) lastTimestampRef.current = now;
-
-    workerRef.current.postMessage({
-      type: 'frame',
-      faceDetected: detected,
-      sample: colors ? { ...colors, timestamp: now } : undefined,
-      roiCenter: roi ? { x: roi.x + roi.width / 2, y: roi.y + roi.height / 2 } : undefined,
-      shouldProcess,
-    } satisfies WorkerMessage);
-
-    rafRef.current = requestAnimationFrame(captureFrame);
+      rafRef.current = requestAnimationFrame(() => captureFrameRef.current?.());
+    };
   }, [videoRef]);
+
+  const resetRefs = () => {
+    sampleCountRef.current = 0;
+    workerRef.current?.postMessage({ type: 'reset' } satisfies WorkerMessage);
+  };
 
   const start = useCallback(async () => {
     if (!cameraActive) return;
 
-    setState('loading');
-    setLoadingMessage('Loading face detection model...');
-    setBpm(null);
-    setConfidence(0);
+    dispatch({ type: 'startLoading' });
     sampleCountRef.current = 0;
 
     try {
       await initFaceDetection();
     } catch (err) {
       console.error('Failed to initialize face detection:', err);
-      setState('idle');
-      setLoadingMessage('');
+      dispatch({ type: 'loadFailed' });
       return;
     }
 
-    setLoadingMessage('');
-    setState('calibrating');
-    setIsRunning(true);
+    dispatch({ type: 'calibrating' });
 
     // Reset worker buffer
     workerRef.current?.postMessage({ type: 'reset' } satisfies WorkerMessage);
 
     // Start capture loop (process trigger is inside captureFrame)
-    rafRef.current = requestAnimationFrame(captureFrame);
-  }, [cameraActive, captureFrame]);
+    rafRef.current = requestAnimationFrame(() => captureFrameRef.current?.());
+  }, [cameraActive]);
 
   const stop = useCallback(() => {
     cancelAnimationFrame(rafRef.current);
-    setIsRunning(false);
-    setState('idle');
-    setBpm(null);
-    setWaveform([]);
-    setFaceROI(null);
-    setFaceDetected(false);
-    sampleCountRef.current = 0;
-    workerRef.current?.postMessage({ type: 'reset' } satisfies WorkerMessage);
+    dispatch({ type: 'stop' });
+    resetRefs();
   }, []);
 
   // Cleanup
@@ -191,25 +245,29 @@ export function usePulseDetection(
     };
   }, []);
 
-  // Stop if camera goes inactive
+  // Stop measurement when camera goes inactive.
+  // Side effects (cancel rAF, reset worker) belong in an effect; state is synced
+  // to the external camera-active signal, so the setState calls are justified.
   useEffect(() => {
-    if (!cameraActive && isRunning) {
-      stop();
+    if (!cameraActive && s.isRunning) {
+      cancelAnimationFrame(rafRef.current);
+      dispatch({ type: 'stop' });
+      resetRefs();
     }
-  }, [cameraActive, isRunning, stop]);
+  }, [cameraActive, s.isRunning]);
 
   return {
-    state,
-    bpm,
-    confidence,
-    quality,
-    waveform,
-    faceROI,
-    faceDetected,
+    state: s.state,
+    bpm: s.bpm,
+    confidence: s.confidence,
+    quality: s.quality,
+    waveform: s.waveform,
+    faceROI: s.faceROI,
+    faceDetected: s.faceDetected,
     start,
     stop,
-    isRunning,
-    newSampleCount,
-    loadingMessage,
+    isRunning: s.isRunning,
+    newSampleCount: s.newSampleCount,
+    loadingMessage: s.loadingMessage,
   };
 }

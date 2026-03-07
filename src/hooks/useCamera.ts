@@ -25,43 +25,47 @@ export function useCamera(): UseCameraResult {
   const [devices, setDevices] = useState<CameraDevice[]>([]);
   const [selectedDevice, setSelectedDevice] = useState<string>('');
 
-  // Enumerate cameras, preferring front-facing on mobile
-  const enumerateDevices = useCallback(async () => {
-    try {
-      const allDevices = await navigator.mediaDevices.enumerateDevices();
-      const videoDevices = allDevices
-        .filter((d) => d.kind === 'videoinput')
-        .map((d, i) => ({
-          deviceId: d.deviceId,
-          label: d.label || `Camera ${i + 1}`,
-        }));
-
-      // On mobile, sort front-facing cameras first so the default is user-facing.
-      // Labels typically contain "front" or "facing front" on mobile browsers.
-      const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-      if (isMobile) {
-        videoDevices.sort((a, b) => {
-          const aFront = /front|user/i.test(a.label) ? 0 : 1;
-          const bFront = /front|user/i.test(b.label) ? 0 : 1;
-          return aFront - bFront;
-        });
-      }
-
-      setDevices(videoDevices);
-      if (videoDevices.length > 0 && !selectedDevice) {
-        setSelectedDevice(videoDevices[0].deviceId);
-      }
-    } catch {
-      // Permission not yet granted — devices will be populated after first getUserMedia
-    }
-  }, [selectedDevice]);
-
+  // Enumerate cameras and update state. Subscribes to devicechange for hot-plug support.
   useEffect(() => {
-    enumerateDevices();
-  }, [enumerateDevices]);
+    const enumerate = async () => {
+      try {
+        const allDevices = await navigator.mediaDevices.enumerateDevices();
+        const videoDevices = allDevices
+          .filter((d) => d.kind === 'videoinput')
+          .map((d, i) => ({
+            deviceId: d.deviceId,
+            label: d.label || `Camera ${i + 1}`,
+          }));
 
-  const start = useCallback(async () => {
+        // On mobile, prefer the standard (non-ultra-wide) front-facing camera.
+        // Ultra-wide lenses produce smaller faces with more distortion, hurting rPPG accuracy.
+        const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+        if (isMobile) {
+          videoDevices.sort((a, b) => {
+            const score = (d: CameraDevice) => {
+              const isFront = /front|user/i.test(d.label);
+              const isUltraWide = /ultra.?wide|wide.?angle|0\.5\s*x/i.test(d.label);
+              return (isFront ? 0 : 2) + (isUltraWide ? 1 : 0);
+            };
+            return score(a) - score(b);
+          });
+        }
+
+        setDevices(videoDevices);
+        setSelectedDevice((prev) => prev || (videoDevices[0]?.deviceId ?? ''));
+      } catch {
+        // Permission not yet granted — devices will be populated after first getUserMedia
+      }
+    };
+
+    enumerate();
+    navigator.mediaDevices.addEventListener('devicechange', enumerate);
+    return () => navigator.mediaDevices.removeEventListener('devicechange', enumerate);
+  }, []);
+
+  const start = useCallback(async (deviceIdOverride?: string) => {
     setError(null);
+    const deviceId = deviceIdOverride ?? selectedDevice;
 
     try {
       const constraints: MediaStreamConstraints = {
@@ -69,7 +73,7 @@ export function useCamera(): UseCameraResult {
           width: { ideal: 640 },
           height: { ideal: 480 },
           frameRate: { ideal: 30 },
-          ...(selectedDevice ? { deviceId: { exact: selectedDevice } } : { facingMode: 'user' }),
+          ...(deviceId ? { deviceId: { exact: deviceId } } : { facingMode: 'user' }),
         },
         audio: false,
       };
@@ -84,7 +88,7 @@ export function useCamera(): UseCameraResult {
       }
 
       // Re-enumerate devices after permission grant (to get labels)
-      enumerateDevices();
+      navigator.mediaDevices.dispatchEvent(new Event('devicechange'));
     } catch (err) {
       const msg =
         err instanceof DOMException
@@ -97,7 +101,7 @@ export function useCamera(): UseCameraResult {
       setError(msg);
       setIsActive(false);
     }
-  }, [selectedDevice, enumerateDevices]);
+  }, [selectedDevice]);
 
   const stop = useCallback(() => {
     if (stream) {
@@ -113,17 +117,12 @@ export function useCamera(): UseCameraResult {
   const selectDevice = useCallback(
     (deviceId: string) => {
       setSelectedDevice(deviceId);
-      if (isActive) {
-        // Restart with new device
-        if (stream) {
-          stream.getTracks().forEach((t) => t.stop());
-        }
-        setIsActive(false);
-        setStream(null);
-        // Will be restarted by the component
+      if (isActive && stream) {
+        stream.getTracks().forEach((t) => t.stop());
+        start(deviceId);
       }
     },
-    [isActive, stream],
+    [isActive, stream, start],
   );
 
   // Cleanup on unmount
