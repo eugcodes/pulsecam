@@ -127,43 +127,17 @@ export function WaveformChart({ waveform, isActive, newSampleCount }: WaveformCh
       const now = performance.now();
       const dpr = window.devicePixelRatio || 1;
       const rect = canvas.getBoundingClientRect();
-      canvas.width = rect.width * dpr;
-      canvas.height = rect.height * dpr;
-      ctx.scale(dpr, dpr);
+      const targetW = rect.width * dpr;
+      const targetH = rect.height * dpr;
+      const resized = canvas.width !== targetW || canvas.height !== targetH;
 
       const w = rect.width;
       const h = rect.height;
 
-      // Background
-      ctx.fillStyle = BG_COLOR;
-      ctx.fillRect(0, 0, w, h);
-
-      // Horizontal grid lines
-      ctx.strokeStyle = GRID_COLOR;
-      ctx.lineWidth = 0.5;
-      for (let y = 0; y < h; y += h / 4) {
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(w, y);
-        ctx.stroke();
-      }
-
       const buf = displayBufRef.current;
 
-      if (buf.length < 2) {
-        ctx.fillStyle = 'rgba(139, 148, 158, 0.4)';
-        ctx.font = '13px -apple-system, sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText(
-          isActiveRef.current ? 'Waiting for signal...' : '',
-          w / 2,
-          h / 2 + 5,
-        );
-        animRef.current = requestAnimationFrame(draw);
-        return;
-      }
-
       // ── Drip-feed: drain pending samples at the measured rate ──────────
+      // (Must run before skip-check so accumulator stays current)
       const dt = lastFrameRef.current > 0 ? now - lastFrameRef.current : 0;
       lastFrameRef.current = now;
 
@@ -191,6 +165,46 @@ export function WaveformChart({ waveform, isActive, newSampleCount }: WaveformCh
           buf[buf.length - toDrain + j] = pending[j];
         }
         pending.splice(0, toDrain);
+      }
+
+      // Skip redraw if nothing changed (no data drained, no resize)
+      if (toDrain === 0 && !resized && buf.length >= 2) {
+        animRef.current = requestAnimationFrame(draw);
+        return;
+      }
+
+      // Only resize canvas when dimensions actually change (avoids clearing)
+      if (resized) {
+        canvas.width = targetW;
+        canvas.height = targetH;
+      }
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+      // Background
+      ctx.fillStyle = BG_COLOR;
+      ctx.fillRect(0, 0, w, h);
+
+      // Horizontal grid lines
+      ctx.strokeStyle = GRID_COLOR;
+      ctx.lineWidth = 0.5;
+      for (let y = 0; y < h; y += h / 4) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(w, y);
+        ctx.stroke();
+      }
+
+      if (buf.length < 2) {
+        ctx.fillStyle = 'rgba(139, 148, 158, 0.4)';
+        ctx.font = '13px -apple-system, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(
+          isActiveRef.current ? 'Waiting for signal...' : '',
+          w / 2,
+          h / 2 + 5,
+        );
+        animRef.current = requestAnimationFrame(draw);
+        return;
       }
 
       // ── Draw waveform ─────────────────────────────────────────────────

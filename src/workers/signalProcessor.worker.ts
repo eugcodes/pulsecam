@@ -22,11 +22,12 @@ const BPM_SMOOTH_WINDOW = 5;
 const bpmSmoothingState = createBpmSmoothingState();
 
 export interface WorkerMessage {
-  type: 'addSample' | 'setFaceDetected' | 'setSampleRate' | 'reset' | 'process';
+  type: 'addSample' | 'setFaceDetected' | 'setSampleRate' | 'reset' | 'process' | 'frame';
   sample?: { r: number; g: number; b: number; timestamp: number };
   roiCenter?: { x: number; y: number };
   faceDetected?: boolean;
   sampleRate?: number;
+  shouldProcess?: boolean;
 }
 
 export interface WorkerResult {
@@ -57,6 +58,53 @@ function getSmoothedBpm(bpm: number): number {
     return (sorted[mid - 1] + sorted[mid]) / 2;
   }
   return sorted[mid];
+}
+
+function doProcess() {
+  const newSampleCount = samplesSinceLastProcess;
+  samplesSinceLastProcess = 0;
+
+  const motionLevel = estimateMotion(roiHistory);
+  let result: PulseResult | null = null;
+
+  if (faceDetected && rgbBuffer.length > sampleRate * 3) {
+    result = processRPPG(rgbBuffer, sampleRate, bpmSmoothingState);
+  }
+
+  const confidence = result?.confidence ?? 0;
+  const quality = assessSignalQuality(confidence, faceDetected, motionLevel);
+
+  let bpm: number | null = null;
+  let smoothedBpm: number | null = null;
+
+  if (result && result.bpm >= 45 && result.bpm <= 180 && confidence > 0.1) {
+    bpm = result.bpm;
+    smoothedBpm = Math.round(getSmoothedBpm(bpm));
+  }
+
+  // Lock window size to prevent length fluctuations from sampleRate jitter.
+  const targetWindow = Math.round(sampleRate * 10);
+  if (stableWindowSize === 0 || Math.abs(targetWindow - stableWindowSize) > stableWindowSize * 0.15) {
+    stableWindowSize = targetWindow;
+  }
+
+  const waveform = result?.waveform
+    ? Array.from(result.waveform.slice(-stableWindowSize))
+    : [];
+
+  const response: WorkerResult = {
+    type: 'result',
+    bpm,
+    smoothedBpm,
+    confidence,
+    quality,
+    waveform,
+    bufferLength: rgbBuffer.length,
+    sampleRate,
+    newSampleCount,
+  };
+
+  self.postMessage(response);
 }
 
 self.onmessage = (e: MessageEvent<WorkerMessage>) => {
@@ -102,51 +150,30 @@ self.onmessage = (e: MessageEvent<WorkerMessage>) => {
       break;
     }
 
+    case 'frame': {
+      // Batched per-frame message: sample + face state + optional process trigger
+      faceDetected = msg.faceDetected ?? faceDetected;
+      if (msg.sample) {
+        rgbBuffer.push(msg.sample);
+        samplesSinceLastProcess++;
+        const maxLen = Math.round(MAX_BUFFER_SECONDS * sampleRate);
+        if (rgbBuffer.length > maxLen) {
+          rgbBuffer = rgbBuffer.slice(-maxLen);
+        }
+      }
+      if (msg.roiCenter) {
+        roiHistory.push(msg.roiCenter);
+        if (roiHistory.length > 60) {
+          roiHistory = roiHistory.slice(-60);
+        }
+      }
+      if (!msg.shouldProcess) break;
+      doProcess();
+      break;
+    }
+
     case 'process': {
-      const newSampleCount = samplesSinceLastProcess;
-      samplesSinceLastProcess = 0;
-
-      const motionLevel = estimateMotion(roiHistory);
-      let result: PulseResult | null = null;
-
-      if (faceDetected && rgbBuffer.length > sampleRate * 3) {
-        result = processRPPG(rgbBuffer, sampleRate, bpmSmoothingState);
-      }
-
-      const confidence = result?.confidence ?? 0;
-      const quality = assessSignalQuality(confidence, faceDetected, motionLevel);
-
-      let bpm: number | null = null;
-      let smoothedBpm: number | null = null;
-
-      if (result && result.bpm >= 45 && result.bpm <= 180 && confidence > 0.1) {
-        bpm = result.bpm;
-        smoothedBpm = Math.round(getSmoothedBpm(bpm));
-      }
-
-      // Lock window size to prevent length fluctuations from sampleRate jitter.
-      const targetWindow = Math.round(sampleRate * 10);
-      if (stableWindowSize === 0 || Math.abs(targetWindow - stableWindowSize) > stableWindowSize * 0.15) {
-        stableWindowSize = targetWindow;
-      }
-
-      const waveform = result?.waveform
-        ? Array.from(result.waveform.slice(-stableWindowSize))
-        : [];
-
-      const response: WorkerResult = {
-        type: 'result',
-        bpm,
-        smoothedBpm,
-        confidence,
-        quality,
-        waveform,
-        bufferLength: rgbBuffer.length,
-        sampleRate,
-        newSampleCount,
-      };
-
-      self.postMessage(response);
+      doProcess();
       break;
     }
   }

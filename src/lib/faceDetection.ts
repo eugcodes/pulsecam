@@ -136,19 +136,23 @@ export function extractROIColors(
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   if (!ctx) return null;
 
-  canvas.width = video.videoWidth;
-  canvas.height = video.videoHeight;
-
-  ctx.drawImage(video, 0, 0);
-
-  const x = Math.round(roi.x);
-  const y = Math.round(roi.y);
   const w = Math.round(roi.width);
   const h = Math.round(roi.height);
 
   if (w <= 0 || h <= 0) return null;
 
-  const imageData = ctx.getImageData(x, y, w, h);
+  // Only resize canvas when ROI dimensions change (avoids costly reallocation)
+  if (canvas.width !== w || canvas.height !== h) {
+    canvas.width = w;
+    canvas.height = h;
+  }
+
+  // Draw only the ROI region instead of the full video frame
+  const x = Math.round(roi.x);
+  const y = Math.round(roi.y);
+  ctx.drawImage(video, x, y, w, h, 0, 0, w, h);
+
+  const imageData = ctx.getImageData(0, 0, w, h);
   const data = imageData.data;
 
   let totalR = 0,

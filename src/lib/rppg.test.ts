@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   posAlgorithm,
+  chromAlgorithm,
   processRPPG,
   createBpmSmoothingState,
   type RGBSample,
@@ -275,7 +276,7 @@ describe('BPM smoothing', () => {
   });
 
   it('subsequent calls smooth BPM via EMA', () => {
-    const state: BpmSmoothingState = { prevBpm: 72.0 };
+    const state: BpmSmoothingState = { prevBpm: 72.0, posLowConfidenceCount: 0 };
 
     // Process with a signal at ~90 BPM
     const samples = makeSyntheticRGB(30, 10, 1.5, 0.03);
@@ -294,7 +295,7 @@ describe('BPM smoothing', () => {
 
   it('does not update prevBpm when confidence is low', () => {
     // Use constant color → zero signal → low confidence
-    const state: BpmSmoothingState = { prevBpm: 72.0 };
+    const state: BpmSmoothingState = { prevBpm: 72.0, posLowConfidenceCount: 0 };
     const samples = makeConstantRGB(30, 10);
     const result = processRPPG(samples, 30, state);
 
@@ -354,5 +355,124 @@ describe('processRPPG integration', () => {
     let nfft = 1;
     while (nfft < N) nfft <<= 1;
     expect(result.spectrum.length).toBe(nfft / 2);
+  });
+});
+
+// ─── chromAlgorithm ───────────────────────────────────────────────────────────
+
+describe('chromAlgorithm', () => {
+  it('returns empty array for fewer than 3 samples', () => {
+    expect(chromAlgorithm([], 30).length).toBe(0);
+    expect(chromAlgorithm([{ r: 1, g: 1, b: 1, timestamp: 0 }], 30).length).toBe(0);
+  });
+
+  it('returns array of same length as input', () => {
+    const samples = makeSyntheticRGB(30, 5, 1.2);
+    const result = chromAlgorithm(samples, 30);
+    expect(result.length).toBe(samples.length);
+    expect(result).toBeInstanceOf(Float64Array);
+  });
+
+  it('produces non-zero output for varying input', () => {
+    const samples = makeSyntheticRGB(30, 5, 1.2);
+    const result = chromAlgorithm(samples, 30);
+    const maxAbs = Math.max(...Array.from(result).map(Math.abs));
+    expect(maxAbs).toBeGreaterThan(0);
+  });
+
+  it('produces near-zero output for constant-color input', () => {
+    const samples = makeConstantRGB(30, 5);
+    const result = chromAlgorithm(samples, 30);
+    const maxAbs = Math.max(...Array.from(result).map(Math.abs));
+    expect(maxAbs).toBeLessThan(1e-6);
+  });
+
+  it('skips windows with near-zero channel means', () => {
+    const samples: RGBSample[] = [];
+    for (let i = 0; i < 100; i++) {
+      samples.push({ r: 0, g: 0, b: 0, timestamp: i * 33 });
+    }
+    const result = chromAlgorithm(samples, 30);
+    for (let i = 0; i < result.length; i++) {
+      expect(result[i]).toBe(0);
+    }
+  });
+
+  it('produces a different signal from POS for the same input', () => {
+    const samples = makeSyntheticRGB(30, 5, 1.2, 0.03);
+    const posResult = posAlgorithm(samples, 30);
+    const chromResult = chromAlgorithm(samples, 30);
+
+    // Both should be non-zero
+    const posMax = Math.max(...Array.from(posResult).map(Math.abs));
+    const chromMax = Math.max(...Array.from(chromResult).map(Math.abs));
+    expect(posMax).toBeGreaterThan(0);
+    expect(chromMax).toBeGreaterThan(0);
+
+    // They should not be identical (different projection coefficients)
+    let identical = true;
+    for (let i = 0; i < posResult.length; i++) {
+      if (Math.abs(posResult[i] - chromResult[i]) > 1e-10) {
+        identical = false;
+        break;
+      }
+    }
+    expect(identical).toBe(false);
+  });
+});
+
+// ─── CHROM fallback mechanism ─────────────────────────────────────────────────
+
+describe('CHROM fallback', () => {
+  it('uses POS when POS confidence is adequate', () => {
+    const state = createBpmSmoothingState();
+    const samples = makeSyntheticRGB(30, 10, 1.2, 0.03);
+
+    const result = processRPPG(samples, 30, state);
+    expect(result).not.toBeNull();
+    if (!result) return;
+
+    // POS works well on clean data — counter should stay at 0 or reset
+    expect(state.posLowConfidenceCount).toBe(0);
+  });
+
+  it('increments posLowConfidenceCount on low-confidence POS', () => {
+    const state = createBpmSmoothingState();
+
+    // Constant color → zero signal → low POS confidence
+    const samples = makeConstantRGB(30, 10);
+    processRPPG(samples, 30, state);
+
+    expect(state.posLowConfidenceCount).toBeGreaterThan(0);
+  });
+
+  it('resets posLowConfidenceCount when POS recovers', () => {
+    const state = createBpmSmoothingState();
+
+    // First: low confidence
+    const badSamples = makeConstantRGB(30, 10);
+    processRPPG(badSamples, 30, state);
+    expect(state.posLowConfidenceCount).toBeGreaterThan(0);
+
+    // Second: good confidence — counter should reset
+    const goodSamples = makeSyntheticRGB(30, 10, 1.2, 0.03);
+    processRPPG(goodSamples, 30, state);
+    expect(state.posLowConfidenceCount).toBe(0);
+  });
+
+  it('still produces valid output without smoothingState (no fallback tracking)', () => {
+    const samples = makeSyntheticRGB(30, 10, 1.2, 0.03);
+    // Without smoothingState, CHROM fallback logic is skipped, POS always used
+    const result = processRPPG(samples, 30);
+    expect(result).not.toBeNull();
+    if (!result) return;
+    expect(result.bpm).toBeGreaterThan(62);
+    expect(result.bpm).toBeLessThan(82);
+  });
+
+  it('createBpmSmoothingState initializes posLowConfidenceCount to 0', () => {
+    const state = createBpmSmoothingState();
+    expect(state.posLowConfidenceCount).toBe(0);
+    expect(state.prevBpm).toBeNull();
   });
 });

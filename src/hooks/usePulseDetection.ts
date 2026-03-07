@@ -51,6 +51,7 @@ export function usePulseDetection(
   const fpsEstRef = useRef(30);
   const frameCountRef = useRef(0);
   const fpsTimerStartRef = useRef(0);
+  const lastRoiRef = useRef<FaceROI | null>(null);
 
   // Initialize worker
   useEffect(() => {
@@ -110,38 +111,33 @@ export function usePulseDetection(
       } satisfies WorkerMessage);
     }
 
-    // Face detection
-    const roi = detectFace(video, now);
+    // Face detection — run every other frame and reuse last ROI on skipped frames.
+    // Face position changes slowly; 15 detections/sec is sufficient for ROI tracking.
+    let roi: FaceROI | null;
+    if (frameCountRef.current % 2 === 0 || !lastRoiRef.current) {
+      roi = detectFace(video, now);
+      lastRoiRef.current = roi;
+    } else {
+      roi = lastRoiRef.current;
+    }
     setFaceROI(roi);
     const detected = roi !== null;
     setFaceDetected(detected);
 
+    // Extract ROI colors and send batched frame message to worker
+    const colors = roi ? extractROIColors(video, roi, canvasRef.current) : null;
+    if (colors) sampleCountRef.current++;
+
+    const shouldProcess = now - lastTimestampRef.current > PROCESS_INTERVAL_MS;
+    if (shouldProcess) lastTimestampRef.current = now;
+
     workerRef.current.postMessage({
-      type: 'setFaceDetected',
+      type: 'frame',
       faceDetected: detected,
+      sample: colors ? { ...colors, timestamp: now } : undefined,
+      roiCenter: roi ? { x: roi.x + roi.width / 2, y: roi.y + roi.height / 2 } : undefined,
+      shouldProcess,
     } satisfies WorkerMessage);
-
-    // Extract ROI colors and send to worker
-    if (roi) {
-      const colors = extractROIColors(video, roi, canvasRef.current);
-      if (colors) {
-        sampleCountRef.current++;
-        workerRef.current.postMessage({
-          type: 'addSample',
-          sample: { ...colors, timestamp: now },
-          roiCenter: {
-            x: roi.x + roi.width / 2,
-            y: roi.y + roi.height / 2,
-          },
-        } satisfies WorkerMessage);
-      }
-    }
-
-    // Periodic processing
-    if (now - lastTimestampRef.current > PROCESS_INTERVAL_MS) {
-      lastTimestampRef.current = now;
-      workerRef.current.postMessage({ type: 'process' } satisfies WorkerMessage);
-    }
 
     rafRef.current = requestAnimationFrame(captureFrame);
   }, [videoRef]);
