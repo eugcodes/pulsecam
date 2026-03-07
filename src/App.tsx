@@ -73,7 +73,7 @@ export default function App() {
           <Controls
             isRunning={pulse.isRunning}
             cameraActive={camera.isActive}
-            onStartCamera={camera.start}
+            onStartCamera={() => camera.start()}
             onStopCamera={handleStopCamera}
             onStartMeasure={pulse.start}
             onStopMeasure={pulse.stop}
