@@ -34,7 +34,7 @@ export function useCamera(): UseCameraResult {
           .filter((d) => d.kind === 'videoinput')
           .map((d, i) => ({
             deviceId: d.deviceId,
-            label: d.label || `Camera ${i + 1}`,
+            label: (d.label || `Camera ${i + 1}`).replace(/\s*\(?[0-9a-f]{4}:[0-9a-f]{4}\)?\s*$/i, '').trim(),
           }));
 
         // On mobile, prefer the standard (non-ultra-wide) front-facing camera.
