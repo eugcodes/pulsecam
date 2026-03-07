@@ -21,8 +21,8 @@ export interface PulseDetectionResult {
   loadingMessage: string;
 }
 
-const PROCESS_INTERVAL_MS = 500; // Process every 500ms
-const CALIBRATION_SAMPLES = 150; // ~5 seconds at 30fps
+const PROCESS_INTERVAL_MS = 250; // Process every 250ms for faster convergence
+const CALIBRATION_SAMPLES = 90; // ~3 seconds at 30fps
 
 export function usePulseDetection(
   videoRef: React.RefObject<HTMLVideoElement | null>,

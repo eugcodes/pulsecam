@@ -18,7 +18,7 @@ let stableWindowSize = 0;
 
 // Smoothing for BPM
 const bpmHistory: number[] = [];
-const BPM_SMOOTH_WINDOW = 5;
+const BPM_SMOOTH_WINDOW = 3;
 const bpmSmoothingState = createBpmSmoothingState();
 
 export interface WorkerMessage {
@@ -145,6 +145,7 @@ self.onmessage = (e: MessageEvent<WorkerMessage>) => {
       roiHistory = [];
       bpmHistory.length = 0;
       bpmSmoothingState.prevBpm = null;
+      bpmSmoothingState.emaCount = 0;
       samplesSinceLastProcess = 0;
       stableWindowSize = 0;
       break;

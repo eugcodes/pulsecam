@@ -45,7 +45,7 @@ export default function App() {
         <Onboarding forceShow onDismiss={() => setShowHelp(false)} />
       )}
 
-      <main className="mx-auto w-full max-w-2xl flex-1 px-4 pt-5 pb-4">
+      <main className="mx-auto w-full max-w-2xl flex-1 overflow-y-auto px-4 pt-5 pb-4">
         {/* Minimal top bar */}
         <div className="mb-4 flex items-center justify-between">
           <h1 className="text-xs font-semibold tracking-[0.2em] text-text-secondary/60 uppercase">

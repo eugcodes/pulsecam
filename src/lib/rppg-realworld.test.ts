@@ -922,7 +922,7 @@ describe('processRPPG: compound adversarial conditions', () => {
 
 describe('processRPPG: BPM smoothing resilience', () => {
   it('EMA smoothing rejects single outlier measurement', () => {
-    const state: BpmSmoothingState = { prevBpm: 72.0, posLowConfidenceCount: 0 };
+    const state: BpmSmoothingState = { prevBpm: 72.0, posLowConfidenceCount: 0, emaCount: 0 };
 
     // Process a clean 72 BPM signal — should stay near 72
     const cleanSamples = makeSyntheticRGB({

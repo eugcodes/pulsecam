@@ -39,10 +39,12 @@ export interface BpmSmoothingState {
   prevBpm: number | null;
   /** Number of consecutive cycles where POS confidence was below the fallback threshold. */
   posLowConfidenceCount: number;
+  /** Number of EMA updates so far (used for adaptive alpha during startup). */
+  emaCount: number;
 }
 
 export function createBpmSmoothingState(): BpmSmoothingState {
-  return { prevBpm: null, posLowConfidenceCount: 0 };
+  return { prevBpm: null, posLowConfidenceCount: 0, emaCount: 0 };
 }
 
 const MIN_HR_HZ = 0.7; // 42 BPM
@@ -285,7 +287,7 @@ export function processRPPG(
   sampleRate: number,
   smoothingState?: BpmSmoothingState,
 ): PulseResult | null {
-  if (rgbBuffer.length < sampleRate * 3) return null;
+  if (rgbBuffer.length < sampleRate * 2) return null;
 
   // 1. Extract pulse signals from both algorithms
   const posRaw = posAlgorithm(rgbBuffer, sampleRate);
@@ -319,13 +321,17 @@ export function processRPPG(
   let bpm = selected.frequency * 60;
   const confidence = selected.confidence;
 
-  // 4. Temporal BPM smoothing (EMA, alpha=0.25 → ~4-frame smoothing)
+  // 4. Temporal BPM smoothing (EMA with adaptive alpha)
+  // Starts at 0.5 for fast convergence, settles to 0.25 after ~5 readings.
   if (smoothingState) {
     if (smoothingState.prevBpm !== null && confidence > 0.1) {
-      bpm = 0.25 * bpm + 0.75 * smoothingState.prevBpm;
+      const age = smoothingState.emaCount ?? 0;
+      const alpha = age < 5 ? 0.5 : 0.25;
+      bpm = alpha * bpm + (1 - alpha) * smoothingState.prevBpm;
     }
     if (confidence > 0.1) {
       smoothingState.prevBpm = bpm;
+      smoothingState.emaCount = (smoothingState.emaCount ?? 0) + 1;
     }
   }
 

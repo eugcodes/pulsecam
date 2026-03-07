@@ -25,7 +25,7 @@ export function useCamera(): UseCameraResult {
   const [devices, setDevices] = useState<CameraDevice[]>([]);
   const [selectedDevice, setSelectedDevice] = useState<string>('');
 
-  // Enumerate cameras
+  // Enumerate cameras, preferring front-facing on mobile
   const enumerateDevices = useCallback(async () => {
     try {
       const allDevices = await navigator.mediaDevices.enumerateDevices();
@@ -35,6 +35,18 @@ export function useCamera(): UseCameraResult {
           deviceId: d.deviceId,
           label: d.label || `Camera ${i + 1}`,
         }));
+
+      // On mobile, sort front-facing cameras first so the default is user-facing.
+      // Labels typically contain "front" or "facing front" on mobile browsers.
+      const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+      if (isMobile) {
+        videoDevices.sort((a, b) => {
+          const aFront = /front|user/i.test(a.label) ? 0 : 1;
+          const bFront = /front|user/i.test(b.label) ? 0 : 1;
+          return aFront - bFront;
+        });
+      }
+
       setDevices(videoDevices);
       if (videoDevices.length > 0 && !selectedDevice) {
         setSelectedDevice(videoDevices[0].deviceId);

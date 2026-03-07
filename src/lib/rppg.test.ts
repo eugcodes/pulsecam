@@ -160,8 +160,8 @@ describe('posAlgorithm', () => {
 // ─── processRPPG ─────────────────────────────────────────────────────────────
 
 describe('processRPPG', () => {
-  it('returns null for insufficient data (< 3 seconds)', () => {
-    const samples = makeSyntheticRGB(30, 2, 1.2); // only 2 seconds
+  it('returns null for insufficient data (< 2 seconds)', () => {
+    const samples = makeSyntheticRGB(30, 1, 1.2); // only 1 second
     const result = processRPPG(samples, 30);
     expect(result).toBeNull();
   });
@@ -276,7 +276,7 @@ describe('BPM smoothing', () => {
   });
 
   it('subsequent calls smooth BPM via EMA', () => {
-    const state: BpmSmoothingState = { prevBpm: 72.0, posLowConfidenceCount: 0 };
+    const state: BpmSmoothingState = { prevBpm: 72.0, posLowConfidenceCount: 0, emaCount: 0 };
 
     // Process with a signal at ~90 BPM
     const samples = makeSyntheticRGB(30, 10, 1.5, 0.03);
@@ -295,7 +295,7 @@ describe('BPM smoothing', () => {
 
   it('does not update prevBpm when confidence is low', () => {
     // Use constant color → zero signal → low confidence
-    const state: BpmSmoothingState = { prevBpm: 72.0, posLowConfidenceCount: 0 };
+    const state: BpmSmoothingState = { prevBpm: 72.0, posLowConfidenceCount: 0, emaCount: 0 };
     const samples = makeConstantRGB(30, 10);
     const result = processRPPG(samples, 30, state);
 

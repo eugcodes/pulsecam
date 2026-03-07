@@ -79,20 +79,54 @@ export function Controls({
         </svg>
       </button>
 
-      {/* Camera selector */}
-      {devices.length > 1 && (
-        <select
-          value={selectedDevice}
-          onChange={(e) => onSelectDevice(e.target.value)}
-          className="h-[46px] rounded-xl border border-border/60 bg-transparent px-3 text-sm text-text-secondary focus:outline-none focus:ring-2 focus:ring-accent"
-          aria-label="Select camera"
-        >
-          {devices.map((d) => (
-            <option key={d.deviceId} value={d.deviceId}>
-              {d.label}
-            </option>
-          ))}
-        </select>
+      {/* Camera selector — always visible when camera is active so users know they can switch */}
+      {cameraActive && devices.length > 0 && (
+        <div className="relative flex items-center">
+          {/* Camera switch icon */}
+          <svg
+            className="pointer-events-none absolute left-3 h-4 w-4 text-text-secondary/60"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={1.5}
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.992 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182M21.015 4.356v4.992"
+            />
+          </svg>
+          <select
+            value={selectedDevice}
+            onChange={(e) => onSelectDevice(e.target.value)}
+            disabled={devices.length <= 1}
+            className={`h-[46px] appearance-none rounded-xl border border-border/60 bg-transparent py-0 pl-9 pr-7 text-sm text-text-secondary transition-colors focus:outline-none focus:ring-2 focus:ring-accent ${
+              devices.length > 1
+                ? 'cursor-pointer hover:bg-bg-secondary'
+                : 'cursor-default opacity-60'
+            }`}
+            aria-label="Select camera"
+            title={devices.length > 1 ? 'Switch camera' : 'Camera'}
+          >
+            {devices.map((d) => (
+              <option key={d.deviceId} value={d.deviceId}>
+                {d.label}
+              </option>
+            ))}
+          </select>
+          {/* Dropdown chevron (only when multiple cameras) */}
+          {devices.length > 1 && (
+            <svg
+              className="pointer-events-none absolute right-2 h-3.5 w-3.5 text-text-secondary/40"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+            </svg>
+          )}
+        </div>
       )}
     </div>
   );
