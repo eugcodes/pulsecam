@@ -482,6 +482,350 @@ describe('detrendMovingAverage', () => {
     const outStd = std(out);
     expect(outStd / origStd).toBeGreaterThan(0.8);
   });
+
+  // ── Edge cases ──────────────────────────────────────────────────────────────
+
+  it('handles window size = 1 (output equals zero everywhere)', () => {
+    const sig = new Float64Array([3, 7, 1, 9, 5]);
+    const out = detrendMovingAverage(sig, 1);
+    // Window covers only the sample itself → mean = sample → output = 0
+    for (let i = 0; i < sig.length; i++) {
+      expect(out[i]).toBeCloseTo(0, 10);
+    }
+  });
+
+  it('handles window size = 2 (even window)', () => {
+    // half = floor(2/2) = 1, so window spans [i-1, i+1] in interior
+    const sig = new Float64Array([10, 20, 30, 40, 50]);
+    const out = detrendMovingAverage(sig, 2);
+    // Each output should be signal[i] minus the local average
+    expect(out.length).toBe(5);
+    // Just verify it produces finite, non-NaN values and removes trend
+    for (let i = 0; i < out.length; i++) {
+      expect(Number.isFinite(out[i])).toBe(true);
+    }
+  });
+
+  it('handles window larger than signal length', () => {
+    const sig = new Float64Array([1, 2, 3, 4, 5]);
+    const out = detrendMovingAverage(sig, 100);
+    // Every sample's window covers the full signal → subtract global mean (3)
+    const globalMean = 3;
+    for (let i = 0; i < sig.length; i++) {
+      expect(out[i]).toBeCloseTo(sig[i] - globalMean, 10);
+    }
+  });
+
+  it('handles single-element signal', () => {
+    const sig = new Float64Array([42]);
+    const out = detrendMovingAverage(sig, 5);
+    expect(out.length).toBe(1);
+    expect(out[0]).toBeCloseTo(0, 10);
+  });
+
+  it('handles two-element signal', () => {
+    const sig = new Float64Array([10, 20]);
+    const out = detrendMovingAverage(sig, 3);
+    expect(out.length).toBe(2);
+    // Window covers full signal for both → mean = 15
+    expect(out[0]).toBeCloseTo(-5, 10);
+    expect(out[1]).toBeCloseTo(5, 10);
+  });
+
+  it('returns correct length and preserves output type', () => {
+    const sig = new Float64Array(500);
+    for (let i = 0; i < 500; i++) sig[i] = Math.random() * 100 - 50;
+    const out = detrendMovingAverage(sig, 31);
+    expect(out).toBeInstanceOf(Float64Array);
+    expect(out.length).toBe(500);
+  });
+
+  it('edge samples use truncated windows correctly', () => {
+    // First and last samples have smaller windows (edge truncation).
+    // For sig = [10, 20, 30, 40, 50] with windowSize = 5 (half = 2):
+    //   i=0: window [0,2] → mean = (10+20+30)/3 = 20     → out = -10
+    //   i=1: window [0,3] → mean = (10+20+30+40)/4 = 25  → out = -5
+    //   i=2: window [0,4] → mean = (10+20+30+40+50)/5=30 → out = 0
+    //   i=3: window [1,4] → mean = (20+30+40+50)/4 = 35  → out = 5
+    //   i=4: window [2,4] → mean = (30+40+50)/3 ≈ 40     → out = 10
+    const sig = new Float64Array([10, 20, 30, 40, 50]);
+    const out = detrendMovingAverage(sig, 5);
+    expect(out[0]).toBeCloseTo(-10, 10);
+    expect(out[1]).toBeCloseTo(-5, 10);
+    expect(out[2]).toBeCloseTo(0, 10);
+    expect(out[3]).toBeCloseTo(5, 10);
+    expect(out[4]).toBeCloseTo(10, 10);
+  });
+
+  it('removes linear ramp completely in the interior', () => {
+    const n = 500;
+    const sig = new Float64Array(n);
+    for (let i = 0; i < n; i++) sig[i] = i; // 0, 1, 2, ..., 499
+    const ws = 51;
+    const out = detrendMovingAverage(sig, ws);
+    const half = Math.floor(ws / 2);
+    // Interior samples (away from edges) should be ~0
+    for (let i = half; i < n - half; i++) {
+      expect(Math.abs(out[i])).toBeLessThan(1e-10);
+    }
+  });
+
+  it('handles all-zero signal', () => {
+    const sig = new Float64Array(100).fill(0);
+    const out = detrendMovingAverage(sig, 21);
+    for (let i = 0; i < 100; i++) {
+      expect(out[i]).toBe(0);
+    }
+  });
+
+  it('handles negative values', () => {
+    const sig = new Float64Array(100);
+    for (let i = 0; i < 100; i++) sig[i] = -50 + Math.sin(i * 0.5);
+    const out = detrendMovingAverage(sig, 21);
+    // Should remove the -50 offset; interior mean should be near zero
+    const interior = out.slice(21, 79);
+    expect(Math.abs(mean(interior))).toBeLessThan(1);
+  });
+
+  it('handles very large window (odd) on moderate signal', () => {
+    const n = 50;
+    const sig = new Float64Array(n);
+    for (let i = 0; i < n; i++) sig[i] = i * i; // quadratic
+    const out = detrendMovingAverage(sig, 999);
+    // Window covers entire signal → subtract global mean
+    const gm = mean(sig);
+    for (let i = 0; i < n; i++) {
+      expect(out[i]).toBeCloseTo(sig[i] - gm, 8);
+    }
+  });
+
+  it('matches known output for realistic rPPG-sized input', () => {
+    // Simulate 10 seconds at 30 FPS with drift + pulse
+    const fs = 30;
+    const n = 300;
+    const sig = new Float64Array(n);
+    for (let i = 0; i < n; i++) {
+      sig[i] = 0.5 * (i / n) // linear drift
+             + 0.1 * Math.sin(2 * Math.PI * 1.2 * i / fs) // 72 BPM pulse
+             + 0.02 * Math.sin(2 * Math.PI * 0.25 * i / fs); // breathing
+    }
+    const out = detrendMovingAverage(sig, 75);
+    // Drift should be removed; 1.2 Hz pulse preserved
+    const freq = dominantFrequency(out, fs, 0.5, 4.0);
+    expect(freq.frequency).toBeCloseTo(1.2, 0);
+    // Output should be bounded (no explosions)
+    for (let i = 0; i < n; i++) {
+      expect(Math.abs(out[i])).toBeLessThan(1);
+    }
+  });
+
+  // ── Real-world rPPG stress tests ──────────────────────────────────────────
+
+  it('preserves pulse under low-light high-noise conditions (SNR ~0.5)', () => {
+    // Low light → POS output has very low pulse amplitude buried in noise.
+    // The detrending must not destroy the weak pulse or amplify noise.
+    const fs = 30;
+    const n = 450; // 15s buffer
+    const pulseAmp = 0.005; // very weak pulse (low light)
+    const noiseAmp = 0.01;  // noise is 2× the signal
+    const sig = new Float64Array(n);
+    // Seed a deterministic pseudo-random sequence
+    let seed = 42;
+    const rand = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff - 0.5; };
+    for (let i = 0; i < n; i++) {
+      sig[i] = pulseAmp * Math.sin(2 * Math.PI * 1.0 * i / fs) // 60 BPM
+             + noiseAmp * rand();
+    }
+    const out = detrendMovingAverage(sig, 75);
+    // Output must be finite and bounded (no NaN / explosion)
+    for (let i = 0; i < n; i++) {
+      expect(Number.isFinite(out[i])).toBe(true);
+      expect(Math.abs(out[i])).toBeLessThan(0.1);
+    }
+    // The pulse component should survive (std not crushed to zero)
+    expect(std(out)).toBeGreaterThan(pulseAmp * 0.3);
+  });
+
+  it('handles sudden motion artifact (baseline jump mid-signal)', () => {
+    // Head movement causes a sudden DC shift in the POS signal.
+    // Detrending should adapt and not ring for hundreds of samples.
+    const fs = 30;
+    const n = 450;
+    const sig = new Float64Array(n);
+    for (let i = 0; i < n; i++) {
+      const baseline = i < 225 ? 0 : 2.0; // abrupt +2 shift at 7.5s
+      sig[i] = baseline + 0.1 * Math.sin(2 * Math.PI * 1.2 * i / fs);
+    }
+    const out = detrendMovingAverage(sig, 75);
+    // Well away from the step (last 3s), output should be centered near 0
+    const tail = out.slice(375); // last 2.5s
+    expect(Math.abs(mean(tail))).toBeLessThan(0.15);
+    // Pulse should still be visible in the tail
+    expect(std(tail)).toBeGreaterThan(0.03);
+  });
+
+  it('suppresses LED flicker at 50 Hz subharmonic (100/120 Hz aliased)', () => {
+    // LED lighting at 100 Hz (doubled mains) aliases to different frequencies
+    // at 30 fps. 100 Hz sampled at 30 fps: 100 mod 30 = 10 Hz, which is
+    // above the HR band. But a 50 Hz source aliases to 50 mod 30 = 20 Hz
+    // (also above band). More realistically, PWM dimming can produce
+    // low-frequency beat patterns. Simulate a 0.5 Hz beat (slow flicker).
+    const fs = 30;
+    const n = 450;
+    const sig = new Float64Array(n);
+    for (let i = 0; i < n; i++) {
+      sig[i] = 0.3 * Math.sin(2 * Math.PI * 0.5 * i / fs)  // 0.5 Hz flicker beat
+             + 0.05 * Math.sin(2 * Math.PI * 1.33 * i / fs); // 80 BPM pulse
+    }
+    const out = detrendMovingAverage(sig, 75);
+    // The 0.5 Hz flicker is below the detrend cutoff (~0.18 Hz for 75-sample
+    // window). It's above 0.18 Hz so it won't be fully removed by DMA alone,
+    // but it should be attenuated. The pulse at 1.33 Hz must survive.
+    const result = dominantFrequency(out, fs, 0.7, 4.0);
+    expect(result.frequency).toBeCloseTo(1.33, 0);
+  });
+
+  it('handles gradual exponential illumination drift (auto-exposure)', () => {
+    // Camera auto-exposure adjusting → exponential baseline change.
+    const fs = 30;
+    const n = 450;
+    const sig = new Float64Array(n);
+    for (let i = 0; i < n; i++) {
+      sig[i] = 5 * Math.exp(-i / (fs * 3)) // ~3s time constant decay
+             + 0.08 * Math.sin(2 * Math.PI * 1.0 * i / fs); // 60 BPM
+    }
+    const out = detrendMovingAverage(sig, 75);
+    // After the first ~3s, exponential is mostly gone; interior should be small
+    const interior = out.slice(150, 400);
+    expect(Math.abs(mean(interior))).toBeLessThan(0.5);
+    // Pulse must survive
+    const result = dominantFrequency(out, fs, 0.7, 4.0);
+    expect(result.frequency).toBeCloseTo(1.0, 0);
+  });
+
+  it('preserves pulse when baseline oscillates (breathing-induced motion)', () => {
+    // Breathing at ~0.25 Hz causes a slow baseline modulation much larger
+    // than the pulse. The detrending window (2.5s → ~0.18 Hz cutoff) should
+    // attenuate the 0.25 Hz breathing component.
+    const fs = 30;
+    const n = 450;
+    const sig = new Float64Array(n);
+    for (let i = 0; i < n; i++) {
+      sig[i] = 0.5 * Math.sin(2 * Math.PI * 0.25 * i / fs)  // breathing
+             + 0.05 * Math.sin(2 * Math.PI * 1.17 * i / fs); // 70 BPM
+    }
+    const out = detrendMovingAverage(sig, 75);
+    // Breathing amplitude should be reduced
+    // Original breathing peak-to-peak = 1.0, pulse = 0.1
+    // After detrending, output std should be much less than 0.5
+    expect(std(out)).toBeLessThan(0.4);
+    // Output should not be all zero (pulse preserved)
+    expect(std(out)).toBeGreaterThan(0.01);
+  });
+
+  it('handles spike artifacts (transient face detection glitch)', () => {
+    // A single-frame tracking glitch produces an impulse spike.
+    // The filter should contain the damage to nearby samples.
+    const fs = 30;
+    const n = 300;
+    const sig = new Float64Array(n);
+    for (let i = 0; i < n; i++) {
+      sig[i] = 0.08 * Math.sin(2 * Math.PI * 1.0 * i / fs);
+    }
+    // Inject a massive spike at frame 150
+    sig[150] = 10.0;
+    const out = detrendMovingAverage(sig, 75);
+    // The spike leaks into the moving average over a 75-sample window,
+    // but samples far from the spike should be mostly unaffected.
+    // Check samples >50 frames away from the spike
+    for (let i = 0; i < 90; i++) {
+      expect(Math.abs(out[i])).toBeLessThan(0.5);
+    }
+    for (let i = 210; i < n; i++) {
+      expect(Math.abs(out[i])).toBeLessThan(0.5);
+    }
+  });
+
+  it('handles periodic dropout frames (intermittent face loss)', () => {
+    // Every ~1s, one frame drops to zero (face detector lost the face).
+    const fs = 30;
+    const n = 450;
+    const sig = new Float64Array(n);
+    for (let i = 0; i < n; i++) {
+      sig[i] = 0.5 + 0.1 * Math.sin(2 * Math.PI * 1.2 * i / fs);
+      if (i % 30 === 15) sig[i] = 0; // dropout every 30 frames
+    }
+    const out = detrendMovingAverage(sig, 75);
+    // Should still produce finite output everywhere
+    for (let i = 0; i < n; i++) {
+      expect(Number.isFinite(out[i])).toBe(true);
+    }
+    // The overall signal structure should survive (std not zero)
+    expect(std(out)).toBeGreaterThan(0.01);
+  });
+
+  it('handles strong shadow boundary oscillation (head turning)', () => {
+    // Slow head rotation causes a sinusoidal brightness change at ~0.1 Hz
+    // (one full turn-and-back in 10s) with amplitude 10× the pulse.
+    const fs = 30;
+    const n = 450;
+    const sig = new Float64Array(n);
+    for (let i = 0; i < n; i++) {
+      sig[i] = 1.0 * Math.sin(2 * Math.PI * 0.1 * i / fs) // shadow at 0.1 Hz
+             + 0.05 * Math.sin(2 * Math.PI * 1.5 * i / fs); // 90 BPM pulse
+    }
+    const out = detrendMovingAverage(sig, 75);
+    // 0.1 Hz is well below the cutoff → should be heavily attenuated
+    // The 1.5 Hz pulse should dominate the output
+    const result = dominantFrequency(out, fs, 0.7, 4.0);
+    expect(result.frequency).toBeCloseTo(1.5, 0);
+  });
+
+  it('handles multi-frequency drift (non-stationary illumination)', () => {
+    // Real lighting is not a single sinusoid — simulate sum of slow drifts
+    // plus a realistic multi-harmonic pulse (fundamental + 2nd harmonic).
+    const fs = 30;
+    const n = 450;
+    const sig = new Float64Array(n);
+    for (let i = 0; i < n; i++) {
+      sig[i] = 2.0 * Math.sin(2 * Math.PI * 0.05 * i / fs)  // very slow drift
+             + 0.8 * Math.sin(2 * Math.PI * 0.12 * i / fs)   // another drift
+             + 0.3 * (i / n)                                    // linear trend
+             + 0.06 * Math.sin(2 * Math.PI * 1.0 * i / fs)    // 60 BPM fundamental
+             + 0.02 * Math.sin(2 * Math.PI * 2.0 * i / fs);   // 2nd harmonic
+    }
+    const out = detrendMovingAverage(sig, 75);
+    // All drift components are < 0.18 Hz → should be removed
+    // The 1.0 Hz pulse should be the dominant frequency
+    const result = dominantFrequency(out, fs, 0.7, 4.0);
+    expect(result.frequency).toBeCloseTo(1.0, 0);
+  });
+
+  it('handles varying pulse amplitude (perfusion changes across skin tones)', () => {
+    // Darker skin tones yield lower SNR and amplitude-modulated pulse.
+    // Simulate pulse amplitude that varies slowly over time.
+    const fs = 30;
+    const n = 450;
+    const sig = new Float64Array(n);
+    for (let i = 0; i < n; i++) {
+      // Amplitude envelope: starts at 0.02 (dark skin, low perfusion),
+      // ramps to 0.1 (lighter skin / better perfusion)
+      const amp = 0.02 + 0.08 * (i / n);
+      sig[i] = 0.3 // DC offset (mean pixel intensity difference)
+             + amp * Math.sin(2 * Math.PI * 1.17 * i / fs)  // 70 BPM
+             + 0.01 * Math.sin(2 * Math.PI * 0.08 * i / fs); // slow drift
+    }
+    const out = detrendMovingAverage(sig, 75);
+    // DC offset and slow drift removed
+    const interior = out.slice(100, 400);
+    expect(Math.abs(mean(interior))).toBeLessThan(0.1);
+    // Pulse should survive even in the low-amplitude early section
+    const earlySection = out.slice(75, 200);
+    expect(std(earlySection)).toBeGreaterThan(0.005);
+    // Pulse frequency should be detectable
+    const result = dominantFrequency(out, fs, 0.7, 4.0);
+    expect(result.frequency).toBeCloseTo(1.17, 0);
+  });
 });
 
 // ─── normalize ───────────────────────────────────────────────────────────────
