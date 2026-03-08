@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useCamera } from './hooks/useCamera';
 import { usePulseDetection } from './hooks/usePulseDetection';
 import { CameraFeed } from './components/CameraFeed';
@@ -12,10 +12,19 @@ export default function App() {
   const camera = useCamera();
   const pulse = usePulseDetection(camera.videoRef, camera.isActive);
   const [showHelp, setShowHelp] = useState(false);
+  const pendingMeasureRef = useRef(false);
 
-  const handleStartCamera = async () => {
-    await camera.start();
-    pulse.start();
+  // Start measurement once camera becomes active
+  useEffect(() => {
+    if (camera.isActive && pendingMeasureRef.current) {
+      pendingMeasureRef.current = false;
+      pulse.start();
+    }
+  }, [camera.isActive, pulse.start]);
+
+  const handleStartCamera = () => {
+    pendingMeasureRef.current = true;
+    camera.start();
   };
 
   const handleStopCamera = () => {
