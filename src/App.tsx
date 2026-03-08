@@ -13,6 +13,11 @@ export default function App() {
   const pulse = usePulseDetection(camera.videoRef, camera.isActive);
   const [showHelp, setShowHelp] = useState(false);
 
+  const handleStartCamera = async () => {
+    await camera.start();
+    pulse.start();
+  };
+
   const handleStopCamera = () => {
     pulse.stop();
     camera.stop();
@@ -30,7 +35,7 @@ export default function App() {
         <Onboarding forceShow onDismiss={() => setShowHelp(false)} />
       )}
 
-      <main className="mx-auto w-full max-w-2xl flex-1 overflow-y-auto px-4 pt-5 pb-4">
+      <main className="mx-auto w-full max-w-2xl min-h-0 flex-1 overflow-y-auto px-4 pt-5 pb-4">
         {/* Minimal top bar */}
         <div className="mb-4 flex items-center justify-between">
           <h1 className="text-xs font-semibold tracking-[0.2em] text-text-secondary/60 uppercase">
@@ -73,7 +78,7 @@ export default function App() {
           <Controls
             isRunning={pulse.isRunning}
             cameraActive={camera.isActive}
-            onStartCamera={() => camera.start()}
+            onStartCamera={handleStartCamera}
             onStopCamera={handleStopCamera}
             onStartMeasure={pulse.start}
             onStopMeasure={pulse.stop}
@@ -109,9 +114,9 @@ export default function App() {
       </main>
 
       {/* Disclaimer */}
-      <footer className="px-4 pb-4 pt-2">
+      <footer className="shrink-0 px-4 pb-4 pt-2">
         <p className="mx-auto max-w-2xl text-center text-[11px] text-text-secondary/40">
-          For educational use only — not a medical device. All processing happens on your device.
+          For educational use only — not a medical device. No data leaves your device.
         </p>
       </footer>
     </div>

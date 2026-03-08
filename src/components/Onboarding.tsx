@@ -26,8 +26,12 @@ export function Onboarding({ forceShow, onDismiss }: OnboardingProps) {
       role="dialog"
       aria-modal="true"
       aria-labelledby="onboarding-title"
+      onClick={dismiss}
     >
-      <div className="my-auto w-full max-w-sm rounded-2xl border border-border bg-bg-secondary p-6 shadow-2xl">
+      <div
+        className="my-auto w-full max-w-sm rounded-2xl border border-border bg-bg-secondary p-6 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* Header */}
         <div className="mb-6 text-center">
           <h2 id="onboarding-title" className="text-lg font-bold tracking-tight text-text-primary">
