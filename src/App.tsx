@@ -82,8 +82,6 @@ export default function App() {
         <div className="mt-3">
           <Controls
             cameraActive={camera.isActive}
-            onStartCamera={handleStartCamera}
-            onStopCamera={handleStopCamera}
             devices={camera.devices}
             selectedDevice={camera.selectedDevice}
             onSelectDevice={camera.selectDevice}

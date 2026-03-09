@@ -46,7 +46,10 @@ export function CameraFeed({
       {/* Camera off */}
       {!isActive && (
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-bg-secondary">
-          <p className="text-sm text-text-secondary/60">Camera off</p>
+          <svg className="mb-2 h-8 w-8 text-text-secondary/30" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25h-9A2.25 2.25 0 0 0 2.25 7.5v9a2.25 2.25 0 0 0 2.25 2.25Z" />
+          </svg>
+          <p className="text-sm text-text-secondary/60">Tap to start</p>
           <p className="mt-3 text-[11px] text-text-secondary/40">For educational use only — not a medical device.</p>
           <p className="text-[11px] text-text-secondary/40">No data leaves your device.</p>
         </div>
