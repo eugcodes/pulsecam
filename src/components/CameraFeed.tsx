@@ -3,6 +3,7 @@ interface CameraFeedProps {
   faceDetected: boolean;
   isActive: boolean;
   isRunning: boolean;
+  onToggleCamera: () => void;
 }
 
 export function CameraFeed({
@@ -10,11 +11,17 @@ export function CameraFeed({
   faceDetected,
   isActive,
   isRunning,
+  onToggleCamera,
 }: CameraFeedProps) {
   return (
     <div
-      className="relative w-full overflow-hidden rounded-xl bg-black sm:max-h-[50vh] lg:max-h-[40vh]"
+      className="relative w-full cursor-pointer overflow-hidden rounded-xl bg-black sm:max-h-[50vh] lg:max-h-[40vh]"
       style={{ aspectRatio: '4/3' }}
+      onClick={onToggleCamera}
+      role="button"
+      tabIndex={0}
+      aria-label={isActive ? 'Turn off camera' : 'Turn on camera'}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggleCamera(); } }}
     >
       <video
         ref={videoRef}

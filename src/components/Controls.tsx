@@ -46,8 +46,8 @@ export function Controls({
         </svg>
       </button>
 
-      {/* Camera selector — always visible when camera is active so users know they can switch */}
-      {cameraActive && devices.length > 0 && (
+      {/* Camera selector — only show when multiple cameras available */}
+      {cameraActive && devices.length > 1 && (
         <div className="relative flex items-center">
           <select
             value={selectedDevice}

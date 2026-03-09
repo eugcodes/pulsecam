@@ -75,6 +75,7 @@ export default function App() {
           faceDetected={pulse.faceDetected}
           isActive={camera.isActive}
           isRunning={pulse.isRunning}
+          onToggleCamera={camera.isActive ? handleStopCamera : handleStartCamera}
         />
 
         {/* Controls */}

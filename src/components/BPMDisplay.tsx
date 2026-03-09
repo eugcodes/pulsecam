@@ -8,7 +8,8 @@ interface BPMDisplayProps {
 
 export function BPMDisplay({ bpm, state, confidence }: BPMDisplayProps) {
   const pulseDuration = bpm && bpm > 0 ? 60 / bpm : 1;
-  const isShowingBpm = state === 'measuring' && bpm;
+  const isCalibrating = state === 'calibrating' || (state === 'measuring' && confidence < 0.5);
+  const isShowingBpm = state === 'measuring' && bpm && !isCalibrating;
 
   return (
     <div className="flex flex-col items-center" aria-live="polite">
@@ -28,7 +29,7 @@ export function BPMDisplay({ bpm, state, confidence }: BPMDisplayProps) {
           </span>
           <span className="text-lg font-medium text-text-secondary/40">BPM</span>
         </div>
-      ) : state === 'calibrating' ? (
+      ) : isCalibrating ? (
         <div className="flex items-baseline gap-1">
           <span className="text-2xl font-semibold tracking-tight text-accent-dim">
             Calibrating
@@ -48,7 +49,7 @@ export function BPMDisplay({ bpm, state, confidence }: BPMDisplayProps) {
         {state === 'loading' && (
           <p className="text-xs text-text-secondary/50">Loading face detection...</p>
         )}
-        {state === 'calibrating' && (
+        {isCalibrating && (
           <p className="text-xs text-accent-dim">Hold still</p>
         )}
         {isShowingBpm && (
