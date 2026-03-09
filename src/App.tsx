@@ -13,6 +13,7 @@ export default function App() {
   const pulse = usePulseDetection(camera.videoRef, camera.isActive);
   const [showHelp, setShowHelp] = useState(false);
   const pendingMeasureRef = useRef(false);
+  const [calibrated, setCalibrated] = useState(false);
 
   // Start measurement once camera becomes active
   useEffect(() => {
@@ -21,6 +22,15 @@ export default function App() {
       pulse.start();
     }
   }, [camera.isActive, pulse.start]);
+
+  // Calibration latch: set once confidence reaches 50%, reset when camera toggles
+  useEffect(() => {
+    if (!camera.isActive) {
+      setCalibrated(false);
+    } else if (pulse.confidence >= 0.5) {
+      setCalibrated(true);
+    }
+  }, [camera.isActive, pulse.confidence]);
 
   const handleStartCamera = () => {
     pendingMeasureRef.current = true;
@@ -94,6 +104,7 @@ export default function App() {
             bpm={pulse.bpm}
             state={pulse.state}
             confidence={pulse.confidence}
+            calibrated={calibrated}
           />
           <SignalQuality
             quality={pulse.quality}
