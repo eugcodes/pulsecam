@@ -4,11 +4,12 @@ interface BPMDisplayProps {
   bpm: number | null;
   state: MeasurementState;
   confidence: number;
+  calibrated: boolean;
 }
 
-export function BPMDisplay({ bpm, state, confidence }: BPMDisplayProps) {
+export function BPMDisplay({ bpm, state, confidence, calibrated }: BPMDisplayProps) {
   const pulseDuration = bpm && bpm > 0 ? 60 / bpm : 1;
-  const isCalibrating = state === 'calibrating' || (state === 'measuring' && confidence < 0.5);
+  const isCalibrating = (state === 'calibrating' || state === 'measuring') && !calibrated;
   const isShowingBpm = state === 'measuring' && bpm && !isCalibrating;
 
   return (
