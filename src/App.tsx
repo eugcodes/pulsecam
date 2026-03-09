@@ -32,10 +32,6 @@ export default function App() {
     camera.stop();
   };
 
-  const handleToggleMeasure = () => {
-    if (pulse.isRunning) pulse.stop();
-    else pulse.start();
-  };
 
   return (
     <div className="flex h-screen flex-col bg-bg-primary">
@@ -79,18 +75,14 @@ export default function App() {
           faceDetected={pulse.faceDetected}
           isActive={camera.isActive}
           isRunning={pulse.isRunning}
-          onToggleMeasure={handleToggleMeasure}
         />
 
         {/* Controls */}
         <div className="mt-3">
           <Controls
-            isRunning={pulse.isRunning}
             cameraActive={camera.isActive}
             onStartCamera={handleStartCamera}
             onStopCamera={handleStopCamera}
-            onStartMeasure={pulse.start}
-            onStopMeasure={pulse.stop}
             devices={camera.devices}
             selectedDevice={camera.selectedDevice}
             onSelectDevice={camera.selectDevice}
@@ -120,11 +112,6 @@ export default function App() {
             />
           </div>
         )}
-
-        {/* Disclaimer */}
-        <p className="mt-6 text-center text-[11px] text-text-secondary/40">
-          For educational use only — not a medical device. No data leaves your device.
-        </p>
       </main>
     </div>
   );

@@ -28,6 +28,12 @@ export function BPMDisplay({ bpm, state, confidence }: BPMDisplayProps) {
           </span>
           <span className="text-lg font-medium text-text-secondary/40">BPM</span>
         </div>
+      ) : state === 'calibrating' ? (
+        <div className="flex items-baseline gap-1">
+          <span className="text-2xl font-semibold tracking-tight text-accent-dim">
+            Calibrating
+          </span>
+        </div>
       ) : (
         <div className="flex items-baseline gap-1">
           <span className="text-4xl font-semibold tracking-tight text-text-secondary/15">
@@ -43,7 +49,7 @@ export function BPMDisplay({ bpm, state, confidence }: BPMDisplayProps) {
           <p className="text-xs text-text-secondary/50">Loading face detection...</p>
         )}
         {state === 'calibrating' && (
-          <p className="text-xs text-accent-dim">Calibrating — hold still</p>
+          <p className="text-xs text-accent-dim">Hold still</p>
         )}
         {isShowingBpm && (
           <p className="text-xs text-text-secondary/50">
