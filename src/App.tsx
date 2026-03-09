@@ -120,14 +120,12 @@ export default function App() {
             />
           </div>
         )}
-      </main>
 
-      {/* Disclaimer */}
-      <footer className="shrink-0 px-4 pb-4 pt-2">
-        <p className="mx-auto max-w-2xl text-center text-[11px] text-text-secondary/40">
+        {/* Disclaimer */}
+        <p className="mt-6 text-center text-[11px] text-text-secondary/40">
           For educational use only — not a medical device. No data leaves your device.
         </p>
-      </footer>
+      </main>
     </div>
   );
 }
